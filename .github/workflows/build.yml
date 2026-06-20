@@ -9,63 +9,56 @@ on:
 jobs:
   build:
     name: Build OpenASD
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Dependencies ────────────────────────────────────────────────────
-      - name: Install build dependencies
+      # ── Toolchain ────────────────────────────────────────────────────────
+      - name: Install LLVM, mtools, QEMU, OVMF
         run: |
           sudo apt-get update -qq
+          # dosfstools provides mkfs.vfat (used by prepare-run)
           sudo apt-get install -y --no-install-recommends \
-            clang lld dosfstools mtools python3 \
-            qemu-system-x86 ovmf
+            dosfstools mtools qemu-system-x86 ovmf python3
+
+          # Ubuntu 22.04 ships clang/lld 14 by default; ld64.lld (Mach-O
+          # linker) lives in the versioned binary. Install explicitly.
+          sudo apt-get install -y --no-install-recommends \
+            clang-15 lld-15
+
+          # Expose as unversioned commands
+          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-15   100
+          sudo update-alternatives --install /usr/bin/ld64.lld ld64.lld /usr/bin/ld64.lld-15 100
+          sudo update-alternatives --install /usr/bin/ld.lld  ld.lld  /usr/bin/ld.lld-15  100
 
       - name: Verify toolchain
         run: |
           clang --version
-          # ld64.lld may have a version suffix on some Ubuntu releases
-          if command -v ld64.lld &>/dev/null; then
-            ld64.lld --version
-          else
-            # Try versioned name and create symlink
-            LLD_VER=$(ls /usr/bin/ld64.lld-* 2>/dev/null | head -1)
-            if [ -n "$LLD_VER" ]; then
-              sudo ln -sf "$LLD_VER" /usr/bin/ld64.lld
-              echo "Linked $LLD_VER → /usr/bin/ld64.lld"
-              ld64.lld --version
-            else
-              echo "ld64.lld not found, checking lld package contents:"
-              dpkg -L lld | grep ld64 || true
-              ls /usr/bin/lld* /usr/bin/ld* 2>/dev/null || true
-              exit 1
-            fi
-          fi
+          ld64.lld --version
+          ld.lld  --version
           mformat --version
-          mkfs.vfat --version || true   # dosfstools
+          mkfs.vfat --version || true
           python3 --version
+          ls /usr/share/OVMF/ 2>/dev/null || ls /usr/share/ovmf/ 2>/dev/null || echo "(OVMF not found at standard paths)"
 
-      - name: Install Rust + apple-darwin target
+      # ── Rust ─────────────────────────────────────────────────────────────
+      - name: Install Rust stable + apple-darwin target
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --default-toolchain stable --no-modify-path
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Add x86_64-apple-darwin target
-        run: |
-          source "$HOME/.cargo/env"
-          rustup target add x86_64-apple-darwin
+          "$HOME/.cargo/bin/rustup" target add x86_64-apple-darwin
 
       # ── Build ────────────────────────────────────────────────────────────
-      - name: Build bootloader
+      - name: Build bootloader (asdboot.efi)
         run: make boot
 
       - name: Build kernel
         run: make kernel
 
-      - name: Build userland (C utilities)
+      - name: Build userland C utilities
         run: make -C userland/bin
 
       - name: Build asdsh shell
@@ -76,48 +69,51 @@ jobs:
 
       - name: Build hx editor (Rust, no_std)
         run: |
-          source "$HOME/.cargo/env"
+          "$HOME/.cargo/bin/cargo" --version
           make -C userland/hx || true
 
-      # ── Images ───────────────────────────────────────────────────────────
-      - name: Find OVMF firmware
+      # ── Locate OVMF ──────────────────────────────────────────────────────
+      - name: Locate OVMF firmware
         id: ovmf
         run: |
-          for code in \
+          CODE=""
+          for f in \
             /usr/share/OVMF/OVMF_CODE.fd \
             /usr/share/OVMF/OVMF_CODE_4M.fd \
             /usr/share/edk2/x64/OVMF_CODE.4m.fd \
-            /usr/share/qemu/OVMF.fd; do
-            if [ -f "$code" ]; then
-              echo "code=$code" >> "$GITHUB_OUTPUT"
-              break
-            fi
+            /usr/share/ovmf/OVMF.fd; do
+            if [ -f "$f" ]; then CODE="$f"; break; fi
           done
-          for vars in \
+
+          VARS=""
+          for f in \
             /usr/share/OVMF/OVMF_VARS.fd \
             /usr/share/OVMF/OVMF_VARS_4M.fd \
-            /usr/share/edk2/x64/OVMF_VARS.4m.fd; do
-            if [ -f "$vars" ]; then
-              echo "vars=$vars" >> "$GITHUB_OUTPUT"
-              break
-            fi
+            /usr/share/edk2/x64/OVMF_VARS.4m.fd \
+            /usr/share/ovmf/OVMF_VARS.fd; do
+            if [ -f "$f" ]; then VARS="$f"; break; fi
           done
-          echo "OVMF_CODE=${{ steps.ovmf.outputs.code }}"
-          echo "OVMF_VARS=${{ steps.ovmf.outputs.vars }}"
 
-      - name: Build live image (prepare-run)
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "vars=$VARS" >> "$GITHUB_OUTPUT"
+          echo "OVMF_CODE = $CODE"
+          echo "OVMF_VARS = $VARS"
+          [ -n "$CODE" ] && [ -n "$VARS" ] || { echo "ERROR: OVMF not found"; exit 1; }
+
+      # ── Images ───────────────────────────────────────────────────────────
+      - name: Build live image
         run: |
           make prepare-run \
             OVMF_CODE="${{ steps.ovmf.outputs.code }}" \
             OVMF_VARS="${{ steps.ovmf.outputs.vars }}"
 
-      - name: Build USB image (GPT + ESP, for real hardware)
+      - name: Build USB image (GPT + EFI System Partition)
         run: make usb-image
 
       # ── Autotest ─────────────────────────────────────────────────────────
-      - name: Patch live image for autotest
+      - name: Patch live image → autotest_hxtest
         run: |
-          cat > /tmp/boot-ci.conf << 'CONF'
+          cat > /tmp/boot-ci.conf << 'EOF'
           timeout = 0
 
           menu
@@ -131,24 +127,21 @@ jobs:
             kernel = "/boot/asdkernel.bin"
             cmdline = "autotest_hxtest"
           end
-          CONF
-          # Remove leading spaces from heredoc
+          EOF
           sed 's/^          //' /tmp/boot-ci.conf > /tmp/boot-ci-clean.conf
           mcopy -o -i build/run/live.img /tmp/boot-ci-clean.conf ::/EFI/BOOT/asdboot.conf
           mcopy -o -i build/run/live.img /tmp/boot-ci-clean.conf ::/boot/asdboot.conf
 
-      - name: Run hxtest in headless QEMU (~45s)
+      - name: Run hxtest (headless QEMU, TCG, ~60s)
         run: |
-          OVMF_CODE="${{ steps.ovmf.outputs.code }}"
-          OVMF_VARS="${{ steps.ovmf.outputs.vars }}"
-          cp "$OVMF_VARS" /tmp/ovmf_vars_ci.fd
+          cp "${{ steps.ovmf.outputs.vars }}" /tmp/ovmf_vars_ci.fd
 
-          timeout 60 qemu-system-x86_64 \
+          timeout 90 qemu-system-x86_64 \
             -machine q35,accel=tcg \
             -cpu qemu64 -m 512 \
             -display none -no-reboot \
             -serial file:/tmp/serial_ci.log \
-            -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
+            -drive "if=pflash,format=raw,readonly=on,file=${{ steps.ovmf.outputs.code }}" \
             -drive "if=pflash,format=raw,file=/tmp/ovmf_vars_ci.fd" \
             -drive "file=build/run/live.img,if=none,id=live0,format=raw" \
             -device virtio-blk-pci,drive=live0,bootindex=1 \
@@ -161,21 +154,19 @@ jobs:
             echo "✓ HXTEST PASSED"
           elif grep -q 'HXTEST FAIL' /tmp/serial_ci.log; then
             grep 'HXTEST FAIL' /tmp/serial_ci.log
-            echo "✗ HXTEST FAILED"
             exit 1
           elif grep -q '\*\*\* EXCEPTION' /tmp/serial_ci.log; then
             grep 'EXCEPTION' /tmp/serial_ci.log
-            echo "✗ KERNEL EXCEPTION"
             exit 1
           else
-            echo "✗ Test did not complete (kernel may not have booted)"
-            grep -E 'ASD|boot|error' /tmp/serial_ci.log | head -20 || true
+            echo "✗ Test did not complete"
             exit 1
           fi
 
       # ── Artifacts ────────────────────────────────────────────────────────
-      - name: Upload USB image
+      - name: Upload USB image artifact
         uses: actions/upload-artifact@v4
+        if: success() || failure()
         with:
           name: openasd-1.0-usb
           path: build/usb/openasd-1.0.img
