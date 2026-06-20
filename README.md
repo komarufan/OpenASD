@@ -1,5 +1,7 @@
 # OpenASD — x86-64 Operating System
 
+[![Build](https://github.com/komarufan/OpenASD/actions/workflows/build.yml/badge.svg)](https://github.com/komarufan/OpenASD/actions/workflows/build.yml)
+
 OpenASD is a research microkernel operating system for x86-64 written in freestanding C and assembly.
 It boots via UEFI, has its own bootloader, kernel, VFS, scheduler, block driver, and a growing userspace.
 
@@ -47,6 +49,27 @@ doc/         — design documents
 ```sh
 make run
 ```
+
+### Running on real hardware (USB boot)
+
+Build a bootable USB image with a proper GPT + EFI System Partition:
+
+```sh
+make usb-image
+# Output: build/usb/openasd-1.0.img
+```
+
+Write to a USB drive:
+
+```sh
+# Linux (replace /dev/sdX with your USB device)
+sudo dd if=build/usb/openasd-1.0.img of=/dev/sdX bs=4M status=progress && sync
+
+# Windows
+# Use Rufus → select the .img file → mode: DD Image → Start
+```
+
+Then select the USB drive in your UEFI boot menu. OpenASD will appear as **"OpenASD 1.0"**.
 
 ## Porting Software to OpenASD
 

@@ -1,0 +1,133 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build OpenASD
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Dependencies ────────────────────────────────────────────────────
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang lld mtools python3 \
+            qemu-system-x86 ovmf
+
+      - name: Verify toolchain
+        run: |
+          clang --version
+          ld64.lld --version 2>/dev/null || ld.lld --version
+          mtools --version
+          python3 --version
+
+      - name: Install Rust + apple-darwin target
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --no-modify-path
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Add x86_64-apple-darwin target
+        run: rustup target add x86_64-apple-darwin
+
+      # ── Build ────────────────────────────────────────────────────────────
+      - name: Build kernel
+        run: make kernel
+
+      - name: Build userland (C utilities)
+        run: make -C userland/bin
+
+      - name: Build asdsh
+        run: make -C userland/sh
+
+      - name: Build mifetch
+        run: make -C userland/mifetch || true
+
+      - name: Build hx editor (Rust)
+        run: make -C userland/hx || true
+
+      # ── Image ────────────────────────────────────────────────────────────
+      - name: Build prepare-run (live image)
+        run: make prepare-run
+
+      - name: Build USB image (GPT + ESP)
+        run: make usb-image
+
+      # ── Test ─────────────────────────────────────────────────────────────
+      - name: Run hxtest (headless QEMU, ~30s)
+        run: |
+          # Patch asdboot.conf in the live image to run the autotest
+          python3 -c "
+          import subprocess, os
+          conf = '''timeout = 0
+          menu
+            title = \"ASD Boot\"
+            default = \"default\"
+          end
+          entry
+            id = \"default\"
+            label = \"ASD Kernel\"
+            kernel = \"/boot/asdkernel.bin\"
+            cmdline = \"autotest_hxtest\"
+          end
+          '''
+          with open('/tmp/boot-ci.conf', 'w') as f:
+              f.write(conf.replace('          ', ''))
+          "
+          mcopy -o -i build/run/live.img /tmp/boot-ci.conf ::/EFI/BOOT/asdboot.conf
+          mcopy -o -i build/run/live.img /tmp/boot-ci.conf ::/boot/asdboot.conf
+
+          OVMF_CODE=$(for f in \
+            /usr/share/OVMF/OVMF_CODE.fd \
+            /usr/share/OVMF/OVMF_CODE_4M.fd \
+            /usr/share/edk2/x64/OVMF_CODE.4m.fd; \
+            do [ -f "$f" ] && echo "$f" && break; done)
+
+          OVMF_VARS=$(for f in \
+            /usr/share/OVMF/OVMF_VARS.fd \
+            /usr/share/OVMF/OVMF_VARS_4M.fd \
+            /usr/share/edk2/x64/OVMF_VARS.4m.fd; \
+            do [ -f "$f" ] && echo "$f" && break; done)
+
+          cp "$OVMF_VARS" /tmp/ovmf_vars_ci.fd
+
+          timeout 60 qemu-system-x86_64 \
+            -machine q35,accel=tcg \
+            -cpu qemu64 -m 512 \
+            -display none -no-reboot \
+            -serial file:/tmp/serial_ci.log \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file=/tmp/ovmf_vars_ci.fd \
+            -drive file=build/run/live.img,if=none,id=live0,format=raw \
+            -device virtio-blk-pci,drive=live0,bootindex=1 \
+            2>/dev/null || true
+
+          echo "=== Serial log ==="
+          cat /tmp/serial_ci.log
+
+          if grep -q 'HXTEST OK' /tmp/serial_ci.log; then
+            echo "✓ HXTEST PASSED"
+          elif grep -q 'HXTEST FAIL' /tmp/serial_ci.log; then
+            echo "✗ HXTEST FAILED"
+            exit 1
+          else
+            echo "✗ HXTEST did not complete (kernel may not have booted)"
+            exit 1
+          fi
+
+      # ── Artifacts ────────────────────────────────────────────────────────
+      - name: Upload USB image
+        uses: actions/upload-artifact@v4
+        with:
+          name: openasd-1.0-usb-image
+          path: build/usb/openasd-1.0.img
+          retention-days: 7

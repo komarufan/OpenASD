@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026, ASD Project Contributors
 
-.PHONY: all boot kernel userland uki live-image prepare-run run run-debug run-headless-debug run-gui-debug bfd bfd-debug bfd-autotest bfd-hxtest iso clean install install-fresh
+.PHONY: all boot kernel userland uki live-image prepare-run run run-debug run-headless-debug run-gui-debug bfd bfd-debug bfd-autotest bfd-hxtest iso usb-image clean install install-fresh
 
 QEMU ?= qemu-system-x86_64
 QEMU_DISPLAY ?= gtk
@@ -36,9 +36,13 @@ OVMF_VARS_BFD := $(DISK_DIR)/OVMF_VARS.fd
 DEBUG_DIR := $(BUILD_DIR)/debug
 SERIAL_LOG := $(DEBUG_DIR)/serial.log
 QEMU_DEBUG_LOG := $(DEBUG_DIR)/qemu.log
-ISO_DIR := $(BUILD_DIR)/iso
-ISO_IMG := $(BUILD_DIR)/asd.iso
-EFI_IMG := $(ISO_DIR)/EFI/efiboot.img
+ISO_DIR  := $(BUILD_DIR)/iso
+ISO_IMG  := $(BUILD_DIR)/asd.iso
+EFI_IMG  := $(ISO_DIR)/EFI/efiboot.img
+VERSION  := 1.0
+USB_DIR  := $(BUILD_DIR)/usb
+USB_IMG  := $(USB_DIR)/openasd-$(VERSION).img
+USB_SIZE_MB := 128
 
 # Shared boot config template — written to $(1)
 define write-asdboot-conf
@@ -469,6 +473,45 @@ bfd-hxtest: all
 	$(call write-asdboot-conf,"$(RUN_DIR)/asdboot.conf")
 	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/EFI/BOOT/asdboot.conf
 	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/boot/asdboot.conf
+
+# -----------------------------------------------------------------------
+# usb-image — bootable GPT disk image for writing to USB drives.
+#
+# Creates a raw disk image with a proper GPT + EFI System Partition (FAT32)
+# so UEFI firmware on real hardware can find and boot OpenASD.
+#
+# Write to USB:
+#   Linux:   sudo dd if=build/usb/openasd-1.0.img of=/dev/sdX bs=4M status=progress
+#   Windows: use Rufus in "DD Image" mode
+# -----------------------------------------------------------------------
+usb-image: all
+	@mkdir -p "$(USB_DIR)"
+	@echo "==> Creating GPT disk image ($(USB_SIZE_MB) MiB)..."
+	@dd if=/dev/zero of="$(USB_IMG)" bs=1M count=$(USB_SIZE_MB) 2>/dev/null
+	@python3 scripts/make_gpt.py "$(USB_IMG)"
+	@echo "==> Formatting ESP (FAT32 at 1 MiB offset)..."
+	@mformat -i "$(USB_IMG)@@1M" -F -v "OPENASD" ::
+	@mmd    -i "$(USB_IMG)@@1M" ::/EFI ::/EFI/BOOT ::/boot ::/bin ::/sbin
+	@echo "==> Copying bootloader and kernel..."
+	@mcopy  -o -i "$(USB_IMG)@@1M" "$(EFI_DIR)/BOOTX64.EFI"    ::/EFI/BOOT/BOOTX64.EFI
+	@mcopy  -o -i "$(USB_IMG)@@1M" "$(EFI_DIR)/asdkernel.bin"  ::/EFI/BOOT/asdkernel.bin
+	@mcopy  -o -i "$(USB_IMG)@@1M" "$(EFI_DIR)/asdboot.conf"   ::/EFI/BOOT/asdboot.conf
+	@mcopy  -o -i "$(USB_IMG)@@1M" "$(BOOT_DIR)/asdkernel.bin" ::/boot/asdkernel.bin
+	@mcopy  -o -i "$(USB_IMG)@@1M" "$(BOOT_DIR)/asdboot.conf"  ::/boot/asdboot.conf
+	@echo "==> Copying userland binaries..."
+	@mcopy  -o -i "$(USB_IMG)@@1M" userland/sh/build/asdsh     ::/bin/asdsh
+	@for b in $(LIVE_BINS); do \
+		mcopy -o -i "$(USB_IMG)@@1M" userland/bin/build/$$b ::/bin/$$b 2>/dev/null || true; \
+	done
+	@mcopy  -o -i "$(USB_IMG)@@1M" userland/mifetch/build/mifetch ::/bin/mifetch 2>/dev/null || true
+	@[ -f userland/hx/build/hx ] && mcopy -o -i "$(USB_IMG)@@1M" userland/hx/build/hx ::/bin/hx || true
+	@mcopy  -o -i "$(USB_IMG)@@1M" userland/sbin/build/asdlog ::/sbin/asdlog 2>/dev/null || true
+	@mcopy  -o -i "$(USB_IMG)@@1M" userland/sbin/build/netd   ::/sbin/netd   2>/dev/null || true
+	@echo ""
+	@echo "==> $(USB_IMG) ($$(du -h "$(USB_IMG)" | cut -f1))"
+	@echo ""
+	@echo "Write to USB (Linux):   sudo dd if=\"$(USB_IMG)\" of=/dev/sdX bs=4M status=progress"
+	@echo "Write to USB (Windows): use Rufus → DD Image mode"
 
 iso: all
 	@mkdir -p "$(ISO_DIR)/EFI/BOOT" "$(ISO_DIR)/boot"
