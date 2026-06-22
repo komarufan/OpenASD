@@ -716,10 +716,100 @@ static void deploy_directory_structure(const char *user_name) {
         if (fd > 0) {
             static const char *motd =
                 "Welcome to OpenASD 1.0\n"
-                "Type 'help' for commands.\n";
+                "Type 'help' for commands.\n"
+                "Tip: 'apm help' to manage packages.\n";
             vfs_write(fd, motd, strlen(motd));
             vfs_close(fd);
             serial_puts("    wrote: /etc/motd\n");
+        }
+    }
+
+    /* /etc/apm/apm.conf */
+    {
+        vfs_mkdir("/etc/apm");
+        fd_t fd = vfs_open("/etc/apm/apm.conf",
+                           VFS_O_WRITE | VFS_O_CREAT | VFS_O_TRUNC, NULL);
+        if (fd > 0) {
+            static const char *conf =
+                "# apm.conf - ASD Package Manager 1.0 configuration\n"
+                "#\n"
+                "# Repository format:\n"
+                "#   repo <name> <url>\n"
+                "#\n"
+                "# Uncomment to enable the official repository:\n"
+                "# repo official https://github.com/komarufan/OpenASD-packages/releases/latest/download\n"
+                "#\n"
+                "arch=x86_64\n";
+            vfs_write(fd, conf, strlen(conf));
+            vfs_close(fd);
+            serial_puts("    wrote: /etc/apm/apm.conf\n");
+        }
+    }
+
+    /* /etc/apm/README — documentation readable via `cat /etc/apm/README` */
+    {
+        fd_t fd = vfs_open("/etc/apm/README",
+                           VFS_O_WRITE | VFS_O_CREAT | VFS_O_TRUNC, NULL);
+        if (fd > 0) {
+            static const char *readme =
+                "APM — ASD Package Manager 1.0\n"
+                "==============================\n"
+                "\n"
+                "QUICK START\n"
+                "-----------\n"
+                "  1. Enable a repository in /etc/apm/apm.conf:\n"
+                "       hx /etc/apm/apm.conf\n"
+                "     Uncomment the line:\n"
+                "       # repo official https://github.com/komarufan/OpenASD-packages/releases/latest/download\n"
+                "\n"
+                "  2. Fetch the package index:\n"
+                "       apm update\n"
+                "\n"
+                "  3. Search and install:\n"
+                "       apm search grep\n"
+                "       apm install grep\n"
+                "\n"
+                "COMMANDS\n"
+                "--------\n"
+                "  apm update              Fetch/refresh repository package indexes\n"
+                "  apm install <pkg>...    Install one or more packages\n"
+                "  apm del <pkg>...        Remove installed packages\n"
+                "  apm upgrade             Upgrade all installed packages\n"
+                "  apm search <query>      Search by name or description\n"
+                "  apm list                List all installed packages\n"
+                "  apm info <pkg>          Show package details\n"
+                "  apm clean               Remove cached archives (/var/apm/cache/)\n"
+                "  apm check               Verify integrity of installed files\n"
+                "  apm help                Show usage\n"
+                "\n"
+                "FILES\n"
+                "-----\n"
+                "  /etc/apm/apm.conf              Configuration (repos, arch)\n"
+                "  /var/apm/db/installed/<n>.apd  Installed package records\n"
+                "  /var/apm/lists/<repo>.idx       Cached repository indexes\n"
+                "  /var/apm/cache/                 Downloaded package archives\n"
+                "\n"
+                "OFFLINE INSTALL\n"
+                "---------------\n"
+                "  When network is unavailable, copy .apkg files manually:\n"
+                "    mkdir -p /var/apm/cache\n"
+                "    # copy <pkg>-1.0-x86_64.apkg to /var/apm/cache/\n"
+                "    # place a minimal index.idx in /var/apm/lists/local.idx\n"
+                "    # add: repo local /var/apm/cache  to /etc/apm/apm.conf\n"
+                "    apm install <pkg>\n"
+                "\n"
+                "NOTES\n"
+                "-----\n"
+                "  - Network downloads require QEMU user-mode networking\n"
+                "    (the default QEMU setup: -netdev user,id=net0)\n"
+                "  - Only HTTP is supported (no HTTPS/TLS in v1)\n"
+                "  - DNS uses 8.8.8.8 over UDP port 53\n"
+                "  - Package archives use the .apkg format (magic: APKG)\n"
+                "\n"
+                "See documentation/10-apm-package-manager.md for full details.\n";
+            vfs_write(fd, readme, strlen(readme));
+            vfs_close(fd);
+            serial_puts("    wrote: /etc/apm/README\n");
         }
     }
 

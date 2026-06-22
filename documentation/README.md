@@ -17,6 +17,7 @@ OpenASD is a 64-bit microkernel operating system for x86-64. This documentation 
 | [07-build-system.md](07-build-system.md) | Build system, toolchain, QEMU setup |
 | [08-ipc-and-pipes.md](08-ipc-and-pipes.md) | Pipes, ringbufs, and IPC primitives |
 | [09-debugging.md](09-debugging.md) | Debugging with QEMU serial output |
+| [10-apm-package-manager.md](10-apm-package-manager.md) | APM package manager: config, database, .apkg format, repo creation |
 
 ---
 

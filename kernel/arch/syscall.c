@@ -922,6 +922,91 @@ static uint64_t sys_net_recv(uint64_t buf_u, uint64_t buf_sz,
 }
 
 /* ------------------------------------------------------------------ */
+/* SYS_TCP_CONNECT (40) — open TCP connection.                         */
+/* a0=dst_ip (host order), a1=dst_port, a2=ptr to int conn_id         */
+/* ------------------------------------------------------------------ */
+static uint64_t sys_tcp_connect(uint64_t ip, uint64_t port, uint64_t id_u) {
+    if (!validate_user_ptr((void *)(uintptr_t)id_u, sizeof(int))) return ESYS_FAULT;
+    int id = -1;
+    int r = net_tcp_connect((uint32_t)ip, (uint16_t)port, &id);
+    if (r != 0) return (uint64_t)(int64_t)-1LL;
+    if (copy_to_user((void *)(uintptr_t)id_u, &id, sizeof(id)) != 0) return ESYS_FAULT;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_TCP_SEND (41) — send data on TCP connection.                    */
+/* a0=id, a1=buf, a2=len                                               */
+/* ------------------------------------------------------------------ */
+static uint64_t sys_tcp_send(uint64_t id, uint64_t buf_u, uint64_t len) {
+    if (len == 0) return 0;
+    if (!validate_user_ptr((void *)(uintptr_t)buf_u, (size_t)len)) return ESYS_FAULT;
+    static uint8_t kbuf[4096];
+    size_t done = 0;
+    while (done < (size_t)len) {
+        size_t chunk = (size_t)len - done;
+        if (chunk > sizeof(kbuf)) chunk = sizeof(kbuf);
+        if (copy_from_user(kbuf, (const uint8_t *)(uintptr_t)buf_u + done, chunk) != 0)
+            return ESYS_FAULT;
+        int r = net_tcp_send((int)id, kbuf, (uint32_t)chunk);
+        if (r < 0) return (uint64_t)(int64_t)(done > 0 ? (long)done : -1LL);
+        done += chunk;
+    }
+    return (uint64_t)done;
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_TCP_RECV (42) — receive data from TCP connection.               */
+/* a0=id, a1=buf, a2=cap, a3=blocking                                  */
+/* ------------------------------------------------------------------ */
+static uint64_t sys_tcp_recv(uint64_t id, uint64_t buf_u,
+                              uint64_t cap, uint64_t blocking) {
+    if (cap == 0) return 0;
+    if (!validate_user_ptr((void *)(uintptr_t)buf_u, (size_t)cap)) return ESYS_FAULT;
+    static uint8_t kbuf[4096];
+    size_t total = 0;
+    while (total < (size_t)cap) {
+        size_t chunk = (size_t)cap - total;
+        if (chunk > sizeof(kbuf)) chunk = sizeof(kbuf);
+        int r = net_tcp_recv((int)id, kbuf, (uint32_t)chunk, (int)blocking);
+        if (r < 0) return (uint64_t)(int64_t)(total > 0 ? (long)total : -1LL);
+        if (r == 0) break; /* EOF */
+        if (copy_to_user((uint8_t *)(uintptr_t)buf_u + total, kbuf, (size_t)r) != 0)
+            return ESYS_FAULT;
+        total += (size_t)r;
+        /* Non-blocking: return whatever we got immediately */
+        if (!blocking) break;
+    }
+    return (uint64_t)total;
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_TCP_CLOSE (43)                                                  */
+/* ------------------------------------------------------------------ */
+static uint64_t sys_tcp_close(uint64_t id) {
+    net_tcp_close((int)id);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_DNS_RESOLVE (44) — hostname → IPv4 (host byte order).          */
+/* a0=hostname ptr, a1=ip_out ptr                                       */
+/* ------------------------------------------------------------------ */
+static uint64_t sys_dns_resolve(uint64_t host_u, uint64_t ip_u) {
+    char hostname[256];
+    if (copy_user_cstr(hostname, sizeof(hostname),
+                       (const char *)(uintptr_t)host_u, 256) != 0)
+        return ESYS_FAULT;
+    if (!validate_user_ptr((void *)(uintptr_t)ip_u, sizeof(uint32_t)))
+        return ESYS_FAULT;
+    uint32_t ip = 0;
+    int r = net_dns_resolve(hostname, &ip);
+    if (r != 0) return (uint64_t)(int64_t)-1LL;
+    if (copy_to_user((void *)(uintptr_t)ip_u, &ip, sizeof(ip)) != 0) return ESYS_FAULT;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* SYS_KILL (35) — send signal to process.                             */
 /* ------------------------------------------------------------------ */
 static uint64_t sys_kill(uint64_t pid_u, uint64_t sig_u) {
@@ -1049,12 +1134,17 @@ uint64_t syscall_dispatch(uint64_t nr,
             copy_to_user((void *)(uintptr_t)a1, &rtt, sizeof(rtt));
         return (uint64_t)(int64_t)r;
     }
-    case SYS_CHDIR:      return sys_chdir(a0);
-    case SYS_GETCWD:     return sys_getcwd_impl(a0, a1);
-    case SYS_KILL:       return sys_kill(a0, a1);
-    case SYS_PIPE:       return sys_pipe(a0);
-    case SYS_DUP2:       return sys_dup2(a0, a1);
-    default:             return ESYS_NOSYS;
+    case SYS_CHDIR:        return sys_chdir(a0);
+    case SYS_GETCWD:       return sys_getcwd_impl(a0, a1);
+    case SYS_KILL:         return sys_kill(a0, a1);
+    case SYS_PIPE:         return sys_pipe(a0);
+    case SYS_DUP2:         return sys_dup2(a0, a1);
+    case SYS_TCP_CONNECT:  return sys_tcp_connect(a0, a1, a2);
+    case SYS_TCP_SEND:     return sys_tcp_send(a0, a1, a2);
+    case SYS_TCP_RECV:     return sys_tcp_recv(a0, a1, a2, a3);
+    case SYS_TCP_CLOSE:    return sys_tcp_close(a0);
+    case SYS_DNS_RESOLVE:  return sys_dns_resolve(a0, a1);
+    default:               return ESYS_NOSYS;
     }
 }
 

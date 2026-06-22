@@ -149,7 +149,7 @@ static void seed_asdsh_into_vfs(void) {
         "asdsh", "mifetch", "hx", "ls", "cat", "mkdir", "rm", "touch",
         "echo", "pwd", "sysinfo", "uname", "uptime", "id", "whoami",
         "kill", "hexdump", "wc", "ping", "filetest", "nettest", "hxtest",
-        "grep", "find", "sort", "head", "tail", "do", NULL
+        "grep", "find", "sort", "head", "tail", "do", "apm", NULL
     };
 
     vfs_mkdir("/bin");

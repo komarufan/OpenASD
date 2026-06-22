@@ -77,7 +77,14 @@
 #define SYS_PIPE      38   /* pipe(int fds[2]) → 0 or -errno */
 #define SYS_DUP2      39   /* dup2(oldfd, newfd) → newfd or -errno */
 
-#define SYSCALL_MAX   39
+/* TCP client (v9) */
+#define SYS_TCP_CONNECT  40  /* (ip, port, *conn_id) → 0 or -errno */
+#define SYS_TCP_SEND     41  /* (id, buf, len) → bytes or -errno */
+#define SYS_TCP_RECV     42  /* (id, buf, cap, blocking) → bytes or -errno */
+#define SYS_TCP_CLOSE    43  /* (id) → 0 */
+#define SYS_DNS_RESOLVE  44  /* (hostname, *ip_out) → 0 or -errno */
+
+#define SYSCALL_MAX   44
 
 /* Signal numbers (subset — enough for v1) */
 #define SIGTERM        1

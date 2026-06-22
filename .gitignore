@@ -1,0 +1,39 @@
+# Build outputs
+build/
+boot/asdboot.efi
+
+# Per-directory build outputs
+userland/bin/build/
+userland/sh/build/
+userland/hx/build/
+userland/mifetch/build/
+userland/fastfetch/build/
+userland/sbin/build/
+userland/libasd/build/
+userland/libasd/rust/asd_sys/target/
+
+kernel/build/
+
+# Compiled object files
+*.o
+*.a
+*.bin
+*.elf
+
+# Package archives
+*.apkg
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyd
+
+# Editor temp files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Log files
+*.log
+serial.log

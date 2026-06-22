@@ -75,6 +75,13 @@
 #define SYS_PIPE      38   /* (int fds[2]) → 0 or -errno */
 #define SYS_DUP2      39   /* (oldfd, newfd) → newfd or -errno */
 
+/* TCP client (v9) */
+#define SYS_TCP_CONNECT  40  /* (ip, port, *conn_id) → 0 or -errno */
+#define SYS_TCP_SEND     41  /* (id, buf, len) → bytes or -errno */
+#define SYS_TCP_RECV     42  /* (id, buf, cap, blocking) → bytes or -errno */
+#define SYS_TCP_CLOSE    43  /* (id) → 0 */
+#define SYS_DNS_RESOLVE  44  /* (hostname, *ip_out) → 0 or -errno */
+
 /* Signal numbers (minimal set for v1) */
 #define SIGTERM        1
 #define SIGKILL        9
@@ -284,6 +291,23 @@ static inline int asd_setuid(unsigned int uid) {
 
 static inline int asd_setgid(unsigned int gid) {
     return (int)__syscall(SYS_SETGID, (long)gid, 0, 0, 0, 0);
+}
+
+/* TCP and DNS wrappers */
+static inline int asd_tcp_connect(uint32_t ip, uint16_t port, int *conn_id) {
+    return (int)__syscall(SYS_TCP_CONNECT, (long)ip, (long)port, (long)conn_id, 0, 0);
+}
+static inline long asd_tcp_send(int id, const void *buf, size_t len) {
+    return __syscall(SYS_TCP_SEND, (long)id, (long)buf, (long)len, 0, 0);
+}
+static inline long asd_tcp_recv(int id, void *buf, size_t cap, int blocking) {
+    return __syscall(SYS_TCP_RECV, (long)id, (long)buf, (long)cap, (long)blocking, 0);
+}
+static inline void asd_tcp_close(int id) {
+    __syscall(SYS_TCP_CLOSE, (long)id, 0, 0, 0, 0);
+}
+static inline int asd_dns_resolve(const char *host, uint32_t *ip_out) {
+    return (int)__syscall(SYS_DNS_RESOLVE, (long)host, (long)ip_out, 0, 0, 0);
 }
 
 /* Signal and IPC wrappers */

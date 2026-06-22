@@ -83,7 +83,7 @@ endef
 
 # Bins to package in /bin on live image / install disk
 LIVE_BINS = ls cat mkdir rm touch echo pwd sysinfo uname uptime id whoami kill hexdump wc ping filetest hxtest \
-            grep find sort head tail do
+            grep find sort head tail do apm
 
 all:
 	$(MAKE) -C boot

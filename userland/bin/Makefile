@@ -14,7 +14,7 @@ LIBASD = ../libasd/build/libasd.a
 START_OBJ = ../libasd/build/start.o
 
 BINS = ls cat mkdir rm touch echo pwd sysinfo uname uptime id whoami kill hexdump wc ping filetest nettest hxtest \
-       grep find sort head tail do
+       grep find sort head tail do apm
 BIN_TARGETS = $(addprefix build/,$(BINS))
 
 .PHONY: all clean libasd

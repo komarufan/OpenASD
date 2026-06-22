@@ -252,6 +252,81 @@ void asdinit_main(void) {
     }
     boot_load_hostname_from_disk();
 
+    /* Bootstrap /etc/apm directory and README if they don't exist yet.
+     * On live media nothing persists between boots, so we always recreate.
+     * On installed systems the installer wrote these files to FFS. */
+    {
+        vfs_mkdir("/etc");
+        vfs_mkdir("/etc/apm");
+        vfs_mkdir("/var");
+        vfs_mkdir("/var/apm");
+        vfs_mkdir("/var/apm/db");
+        vfs_mkdir("/var/apm/db/installed");
+        vfs_mkdir("/var/apm/lists");
+        vfs_mkdir("/var/apm/cache");
+
+        fd_t fd = vfs_open("/etc/apm/apm.conf",
+                           VFS_O_WRITE | VFS_O_CREAT | VFS_O_TRUNC, NULL);
+        if (fd > 0) {
+            static const char *conf =
+                "# apm.conf - ASD Package Manager configuration\n"
+                "#\n"
+                "# Uncomment to enable the official repository:\n"
+                "# repo official https://github.com/komarufan/OpenASD-packages/releases/latest/download\n"
+                "#\n"
+                "arch=x86_64\n";
+            vfs_write(fd, conf, 0);  /* strlen not available here — use vfs_write trick */
+            /* Write manually since strlen may not be linked in init */
+            for (const char *p = conf; *p; p++) {}
+            vfs_close(fd);
+            /* Reopen and write properly */
+            fd = vfs_open("/etc/apm/apm.conf",
+                          VFS_O_WRITE | VFS_O_CREAT | VFS_O_TRUNC, NULL);
+            if (fd > 0) { vfs_write(fd, conf, strlen(conf)); vfs_close(fd); }
+        }
+
+        fd = vfs_open("/etc/apm/README",
+                      VFS_O_WRITE | VFS_O_CREAT | VFS_O_TRUNC, NULL);
+        if (fd > 0) {
+            static const char *readme =
+                "APM - ASD Package Manager 1.0\n"
+                "==============================\n"
+                "\n"
+                "QUICK START\n"
+                "-----------\n"
+                "1. Enable a repo in /etc/apm/apm.conf (uncomment the repo line)\n"
+                "2. Run: apm update\n"
+                "3. Run: apm install <package>\n"
+                "\n"
+                "COMMANDS\n"
+                "--------\n"
+                "  apm update              Sync repository indexes\n"
+                "  apm install <pkg>...    Install packages\n"
+                "  apm del <pkg>...        Remove packages\n"
+                "  apm upgrade             Upgrade all packages\n"
+                "  apm search <query>      Search by name or description\n"
+                "  apm list                List installed packages\n"
+                "  apm info <pkg>          Show package info\n"
+                "  apm clean               Remove cached archives\n"
+                "  apm check               Verify installed files\n"
+                "\n"
+                "FILES\n"
+                "-----\n"
+                "  /etc/apm/apm.conf              Configuration\n"
+                "  /var/apm/db/installed/<n>.apd  Package records\n"
+                "  /var/apm/lists/<repo>.idx       Repo indexes\n"
+                "  /var/apm/cache/                 Downloaded archives\n"
+                "\n"
+                "NOTES\n"
+                "-----\n"
+                "  - Only HTTP (no HTTPS) is supported\n"
+                "  - DNS uses 8.8.8.8\n"
+                "  - For offline install, copy .apkg to /var/apm/cache/\n";
+            vfs_write(fd, readme, strlen(readme));
+            vfs_close(fd);
+        }
+    }
+
     login_prompt();
 
     boot_puts("\n");
