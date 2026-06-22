@@ -61,13 +61,12 @@ int main(void) {
         }
     }
 
-    /* ── Test 3: TCP connect to 140.82.121.4:443 (github.com HTTPS) ── */
+    /* ── Test 3: TCP connect to github.com:443 (external HTTPS) ────── */
     outn("NETTEST [3/3] TCP connect github.com:443...");
     {
-        /* Try DNS-resolved IP first, then fallback to known GitHub IP */
         uint32_t ip = 0;
         asd_dns_resolve("github.com", &ip);
-        if (ip == 0) ip = (140u<<24)|(82u<<16)|(121u<<8)|4u; /* fallback */
+        if (ip == 0) ip = (140u<<24)|(82u<<16)|(121u<<8)|4u;
 
         int conn = -1;
         int r = asd_tcp_connect(ip, 443, &conn);

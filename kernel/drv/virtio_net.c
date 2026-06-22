@@ -461,3 +461,9 @@ void virtio_net_get_mac(uint8_t mac[6]) {
 int virtio_net_ready(void) {
     return g_ready;
 }
+
+uint16_t virtio_net_rx_used_idx(void) {
+    if (!g_ready || !g_rxq) return 0;
+    __asm__ volatile("" ::: "memory");
+    return g_rxq->used.idx;
+}

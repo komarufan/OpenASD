@@ -615,11 +615,14 @@ static tcp_conn_t g_tcp[NET_TCP_MAX_CONN];
 static uint16_t tcp_cksum(uint32_t sip, uint32_t dip,
                            const void *tcp_data, uint16_t tcp_len) {
     uint32_t sum = 0;
-    /* pseudo-header: src, dst (big-endian), zero, proto=6, length */
-    sum += (sip >> 16) & 0xFFFF;
-    sum += sip & 0xFFFF;
-    sum += (dip >> 16) & 0xFFFF;
-    sum += dip & 0xFFFF;
+    /* Pseudo-header: IPs must be in network byte order for LE-read consistency.
+     * htonl converts host-order IP to network order; splitting gives correct LE words. */
+    uint32_t nsip = htonl(sip);
+    uint32_t ndip = htonl(dip);
+    sum += (nsip >> 16) & 0xFFFF;
+    sum += nsip & 0xFFFF;
+    sum += (ndip >> 16) & 0xFFFF;
+    sum += ndip & 0xFFFF;
     sum += htons(6);
     sum += htons(tcp_len);
     const uint16_t *p = (const uint16_t *)tcp_data;
@@ -758,9 +761,12 @@ static void tcp_handle(uint32_t src_ip, const uint8_t *data, uint16_t len) {
     for (int i = 0; i < NET_TCP_MAX_CONN; i++) {
         tcp_conn_t *c = &g_tcp[i];
         if (c->state == TCP_ST_CLOSED) continue;
-        if (c->remote_ip   != src_ip)  continue;
-        if (c->remote_port != src_port) continue;
-        if (c->local_port  != dst_port) continue;
+        if (c->local_port != dst_port) continue;
+        if (c->remote_port != src_port) {
+            net_dbg("[TCP] rx: rport mismatch\n"); continue;
+        }
+        if (c->remote_ip != src_ip)
+            c->remote_ip = src_ip;  /* accept SLIRP NAT */
         tcp_rx_conn(c, tcp->flags, seq, ack, payload, plen);
         return;
     }
@@ -789,8 +795,8 @@ int net_tcp_connect(uint32_t dst_ip, uint16_t dst_port, int *conn_out) {
     }
     c->snd_nxt++;   /* SYN consumes one sequence number */
 
-    /* Wait for SYN-ACK (up to ~3s = 300 × 10ms ticks) */
-    for (int t = 0; t < 300; t++) {
+    /* Wait for SYN-ACK (up to ~6s = 600 × 10ms ticks) */
+    for (int t = 0; t < 600; t++) {
         __asm__ volatile("sti; hlt; cli" ::: "memory");
         virtio_net_rx_poll();
         if (c->state == TCP_ST_ESTABLISHED) { *conn_out = slot; return 0; }
@@ -875,7 +881,7 @@ int net_tcp_alive(int id) {
  * Implements a minimal DNS A-record query (no AAAA, no CNAME follow).
  * ================================================================ */
 
-#define DNS_SERVER_IP  0x08080808u  /* 8.8.8.8  */
+#define DNS_SERVER_IP  0x0A000203u  /* 10.0.2.3 — QEMU SLIRP built-in DNS proxy */
 #define DNS_PORT       53
 #define DNS_SRC_PORT   1053
 #define DNS_QUERY_ID   0xABCDu
@@ -932,7 +938,7 @@ int net_dns_resolve(const char *hostname, uint32_t *ip_out) {
     if (qlen < 0) return -1;
 
     /* Send DNS query (UDP) */
-    net_dbg("[DNS] sending UDP to 8.8.8.8:53...\n");
+    net_dbg("[DNS] sending UDP to 10.0.2.3:53 (SLIRP DNS)...\n");
     if (net_udp_send(DNS_SERVER_IP, DNS_SRC_PORT, DNS_PORT,
                      qbuf, (uint16_t)qlen) != 0) {
         net_dbg("[DNS] FAIL: UDP send failed\n");

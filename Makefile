@@ -82,7 +82,7 @@ define check-ovmf
 endef
 
 # Bins to package in /bin on live image / install disk
-LIVE_BINS = ls cat mkdir rm touch echo pwd sysinfo uname uptime id whoami kill hexdump wc ping filetest hxtest \
+LIVE_BINS = ls cat mkdir rm touch echo pwd sysinfo uname uptime id whoami kill hexdump wc ping filetest nettest hxtest \
             grep find sort head tail do apm
 
 all:
@@ -498,8 +498,8 @@ bfd-nettest: all
 		exit 1; \
 	fi
 	$(call write-asdboot-conf-nettest,"$(RUN_DIR)/asdboot-nettest.conf")
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-nettest.conf" ::/EFI/BOOT/asdboot.conf
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-nettest.conf" ::/boot/asdboot.conf
+	@mcopy -o -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-nettest.conf" ::/EFI/BOOT/asdboot.conf
+	@mcopy -o -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-nettest.conf" ::/boot/asdboot.conf
 	@if [ ! -f "$(OVMF_CODE)" ] || [ ! -f "$(OVMF_VARS)" ]; then \
 		echo "OVMF firmware not found."; exit 1; fi
 	@if [ ! -f "$(OVMF_VARS_BFD)" ]; then cp "$(OVMF_VARS)" "$(OVMF_VARS_BFD)"; fi
