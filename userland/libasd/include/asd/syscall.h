@@ -82,6 +82,14 @@
 #define SYS_TCP_CLOSE    43  /* (id) → 0 */
 #define SYS_DNS_RESOLVE  44  /* (hostname, *ip_out) → 0 or -errno */
 
+/* TLS 1.3 client (v10) */
+#define SYS_TLS_CONNECT  45  /* (tcp_id, hostname) → tls_id or -errno */
+#define SYS_TLS_SEND     46  /* (id, buf, len) → bytes or -errno */
+#define SYS_TLS_RECV     47  /* (id, buf, cap, blocking) → bytes or -errno */
+#define SYS_TLS_CLOSE    48  /* (id) → 0 */
+#define SYS_MEMINFO      49  /* (*total_kb, *used_kb) → 0 */
+#define SYS_GETUSERNAME  50  /* (buf, size) → 0 or -errno */
+
 /* Signal numbers (minimal set for v1) */
 #define SIGTERM        1
 #define SIGKILL        9
@@ -308,6 +316,26 @@ static inline void asd_tcp_close(int id) {
 }
 static inline int asd_dns_resolve(const char *host, uint32_t *ip_out) {
     return (int)__syscall(SYS_DNS_RESOLVE, (long)host, (long)ip_out, 0, 0, 0);
+}
+
+/* TLS wrappers */
+static inline int asd_tls_connect(int tcp_id, const char *hostname) {
+    return (int)__syscall(SYS_TLS_CONNECT, (long)tcp_id, (long)hostname, 0, 0, 0);
+}
+static inline long asd_tls_send(int id, const void *buf, size_t len) {
+    return __syscall(SYS_TLS_SEND, (long)id, (long)buf, (long)len, 0, 0);
+}
+static inline long asd_tls_recv(int id, void *buf, size_t cap, int blocking) {
+    return __syscall(SYS_TLS_RECV, (long)id, (long)buf, (long)cap, (long)blocking, 0);
+}
+static inline void asd_tls_close(int id) {
+    __syscall(SYS_TLS_CLOSE, (long)id, 0, 0, 0, 0);
+}
+static inline int asd_meminfo(uint64_t *total_kb, uint64_t *used_kb) {
+    return (int)__syscall(SYS_MEMINFO, (long)total_kb, (long)used_kb, 0, 0, 0);
+}
+static inline int asd_getusername(char *buf, size_t size) {
+    return (int)__syscall(SYS_GETUSERNAME, (long)buf, (long)size, 0, 0, 0);
 }
 
 /* Signal and IPC wrappers */

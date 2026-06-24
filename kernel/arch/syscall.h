@@ -84,7 +84,15 @@
 #define SYS_TCP_CLOSE    43  /* (id) → 0 */
 #define SYS_DNS_RESOLVE  44  /* (hostname, *ip_out) → 0 or -errno */
 
-#define SYSCALL_MAX   44
+/* TLS 1.3 client (v10) */
+#define SYS_TLS_CONNECT  45  /* (tcp_id, hostname) → tls_id or -errno */
+#define SYS_TLS_SEND     46  /* (id, buf, len) → bytes or -errno */
+#define SYS_TLS_RECV     47  /* (id, buf, cap, blocking) → bytes or -errno */
+#define SYS_TLS_CLOSE    48  /* (id) → 0 */
+#define SYS_MEMINFO      49  /* (*total_kb_out, *used_kb_out) → 0 */
+#define SYS_GETUSERNAME  50  /* (buf, size) → 0 or -errno */
+
+#define SYSCALL_MAX   50
 
 /* Signal numbers (subset — enough for v1) */
 #define SIGTERM        1

@@ -482,14 +482,7 @@ static void shell_print_prompt(void) {
     serial_puts((g_shell_uid == UID_ROOT) ? "# " : "$ ");
 }
 
-/* Run one /bin command for kernel autotest (serial-only debug). */
-void shell_autotest_exec(const char *cmd) {
-    serial_puts("\n[autotest] exec: ");
-    serial_puts(cmd);
-    serial_puts("\n");
-    try_exec(cmd);
-    serial_puts("[autotest] finished\n");
-}
+
 
 /* ------------------------------------------------------------------ */
 /* Main shell loop                                                      */

@@ -932,3 +932,8 @@ void kfree(void *ptr) {
     s->free_count++;
     spin_unlock(&g_slab_lock);
 }
+
+void mm_get_meminfo(uint64_t *total_bytes, uint64_t *free_bytes) {
+    *total_bytes = g_phys.total_pages * PAGE_SIZE;
+    *free_bytes  = g_phys.free_pages  * PAGE_SIZE;
+}

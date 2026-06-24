@@ -62,6 +62,7 @@ static const char g_smap[128] = {
 };
 
 static int g_shift = 0;
+static int g_ctrl  = 0;
 static int g_ext   = 0;
 
 void ps2kbd_init(void) {
@@ -83,15 +84,28 @@ void ps2kbd_isr(void) {
         if (sc == 0x50) { buf_push((char)0x81); return; }   /* ↓ */
         if (sc == 0x4B) { buf_push((char)0x82); return; }   /* ← */
         if (sc == 0x4D) { buf_push((char)0x83); return; }   /* → */
+        if (sc == 0x53) { buf_push((char)0x84); return; }   /* Delete */
+        if (sc == 0x49) { buf_push((char)0x85); return; }   /* PgUp */
+        if (sc == 0x51) { buf_push((char)0x86); return; }   /* PgDn */
+        if (sc == 0x47) { buf_push((char)0x87); return; }   /* Home */
+        if (sc == 0x4F) { buf_push((char)0x88); return; }   /* End */
         return;
     }
+
+    /* Ctrl make/break (scancode 0x1D = Left Ctrl) */
+    if (sc == 0x1D) { g_ctrl = 1; return; }
+    if (sc == 0x9D) { g_ctrl = 0; return; }
 
     if (sc == 0x2A || sc == 0x36) { g_shift = 1; return; }
     if (sc == 0xAA || sc == 0xB6) { g_shift = 0; return; }
     if (sc & 0x80) return;   /* key release */
 
     char ch = g_shift ? g_smap[sc] : g_map[sc];
-    if (ch) buf_push(ch);
+    if (ch) {
+        if (g_ctrl && ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 1);  /* ^a=1..^z=26 */
+        else if (g_ctrl && ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 1);
+        buf_push(ch);
+    }
 }
 
 int ps2kbd_getc(char *out) {

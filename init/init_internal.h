@@ -132,7 +132,7 @@ int  boot_passwd_was_loaded(void);
 /* ------------------------------------------------------------------ */
 
 void asd_shell_loop(void) __attribute__((noreturn));
-void shell_autotest_exec(const char *cmd);
+
 
 /* ------------------------------------------------------------------ */
 /* Service manager (svcmgr.c)                                          */

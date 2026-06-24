@@ -414,11 +414,15 @@ static void ip4_handle(const uint8_t *data, uint16_t len) {
     uint8_t ihl = (ip->ihl_ver & 0x0F) << 2;
     if (ihl < sizeof(ip4_hdr_t) || ihl > len) return;
 
+    /* Use IP total_len to exclude Ethernet zero-padding on short frames */
+    uint16_t ip_total = ntohs(ip->total_len);
+    if (ip_total < ihl || ip_total > len) ip_total = len;
+
     uint32_t dst = ntohl(ip->dst_ip);
     if (dst != NET_IP_ADDR && dst != 0xFFFFFFFFu) return;
 
     const uint8_t *pl = data + ihl;
-    uint16_t plen = (uint16_t)(len - ihl);
+    uint16_t plen = (uint16_t)(ip_total - ihl);
 
     if (ip->proto == IP_PROTO_ICMP) {
         icmp_handle(pl, plen);
@@ -474,7 +478,6 @@ int net_udp_send(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
         nexthop = NET_GW_ADDR;
 
     if (arp_lookup(nexthop, dst_mac) != 0) {
-        net_dbg("[UDP] ARP miss, resolving gateway...\n");
         for (int a = 0; a < 30; a++) {
             arp_send_request(nexthop);
             for (int p = 0; p < 10; p++) {
@@ -774,7 +777,18 @@ static void tcp_handle(uint32_t src_ip, const uint8_t *data, uint16_t len) {
 
 /* ── Public TCP API ── */
 
+static uint16_t g_tcp_port_counter = 0;
+
 int net_tcp_connect(uint32_t dst_ip, uint16_t dst_port, int *conn_out) {
+    if (!virtio_net_ready()) return -1;
+    /* Seed port counter from PIT on first use to avoid reusing ports
+     * across QEMU reboots (SLIRP TIME_WAIT on host side).
+     * Use full 14-bit range (16384 ports) so consecutive boots pick
+     * very different starting ports. */
+    if (g_tcp_port_counter == 0) {
+        extern uint64_t pit_ticks(void);
+        g_tcp_port_counter = (uint16_t)(pit_ticks() & 0x3FFFu) + 1;
+    }
     if (!virtio_net_ready()) return -1;
     int slot = -1;
     for (int i = 0; i < NET_TCP_MAX_CONN; i++) {
@@ -786,7 +800,7 @@ int net_tcp_connect(uint32_t dst_ip, uint16_t dst_port, int *conn_out) {
     memset(c, 0, sizeof(*c));
     c->remote_ip   = dst_ip;
     c->remote_port = dst_port;
-    c->local_port  = (uint16_t)(NET_TCP_EPHEM_BASE + slot);
+    c->local_port  = (uint16_t)(NET_TCP_EPHEM_BASE + (g_tcp_port_counter++ % 16384));
     c->snd_nxt     = (uint32_t)(0xC0DE0000u + (uint32_t)slot);
     c->state       = TCP_ST_SYN_SENT;
 
@@ -795,8 +809,8 @@ int net_tcp_connect(uint32_t dst_ip, uint16_t dst_port, int *conn_out) {
     }
     c->snd_nxt++;   /* SYN consumes one sequence number */
 
-    /* Wait for SYN-ACK (up to ~6s = 600 × 10ms ticks) */
-    for (int t = 0; t < 600; t++) {
+    /* Wait for SYN-ACK (up to ~10s) */
+    for (int t = 0; t < 1000; t++) {
         __asm__ volatile("sti; hlt; cli" ::: "memory");
         virtio_net_rx_poll();
         if (c->state == TCP_ST_ESTABLISHED) { *conn_out = slot; return 0; }
@@ -917,7 +931,6 @@ static int dns_build_query(const char *host, uint8_t *buf, int cap) {
 }
 
 int net_dns_resolve(const char *hostname, uint32_t *ip_out) {
-    net_dbg("[DNS] resolve: "); net_dbg(hostname); net_dbg("\n");
     if (!virtio_net_ready()) {
         net_dbg("[DNS] FAIL: virtio_net not ready\n");
         return -1;
@@ -938,13 +951,11 @@ int net_dns_resolve(const char *hostname, uint32_t *ip_out) {
     if (qlen < 0) return -1;
 
     /* Send DNS query (UDP) */
-    net_dbg("[DNS] sending UDP to 10.0.2.3:53 (SLIRP DNS)...\n");
     if (net_udp_send(DNS_SERVER_IP, DNS_SRC_PORT, DNS_PORT,
                      qbuf, (uint16_t)qlen) != 0) {
         net_dbg("[DNS] FAIL: UDP send failed\n");
         return -1;
     }
-    net_dbg("[DNS] UDP sent, waiting for reply...\n");
 
     /* Wait for response (up to ~3s, checking UDP ring) */
     static uint8_t rbuf[512];

@@ -341,6 +341,14 @@ static void handle_ansi_csi(char c) {
                 static const uint32_t pal[] = {0x000000, 0xAA0000, 0x00AA00, 0xAA5500, 0x0000AA, 0xAA00AA, 0x00AAAA, 0xAAAAAA};
                 g_bg = pal[m - 40];
             }
+            else if (m >= 90 && m <= 97) {
+                static const uint32_t bpal[] = {0x555555, 0xFF5555, 0x55FF55, 0xFFFF55, 0x5555FF, 0xFF69B4, 0x55FFFF, 0xFFFFFF};
+                g_fg = bpal[m - 90];
+            }
+            else if (m >= 100 && m <= 107) {
+                static const uint32_t bpal[] = {0x555555, 0xFF5555, 0x55FF55, 0xFFFF55, 0x5555FF, 0xFF69B4, 0x55FFFF, 0xFFFFFF};
+                g_bg = bpal[m - 100];
+            }
         }
         break;
     }

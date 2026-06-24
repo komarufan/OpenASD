@@ -149,17 +149,17 @@ impl Editor {
 
     fn handle_normal(&mut self, ch: u8) {
         match ch {
-            b'h' => {
+            b'h' | 0x82 => {  /* h or ← */
                 if self.cursor_col > 0 { self.cursor_col -= 1; }
             }
-            b'l' => {
+            b'l' | 0x83 => {  /* l or → */
                 let len = self.buf.line_len(self.cursor_row);
                 if len > 0 && self.cursor_col < len - 1 { self.cursor_col += 1; }
             }
-            b'k' => {
+            b'k' | 0x80 => {  /* k or ↑ */
                 if self.cursor_row > 0 { self.cursor_row -= 1; }
             }
-            b'j' => {
+            b'j' | 0x81 => {  /* j or ↓ */
                 if self.cursor_row + 1 < self.buf.count { self.cursor_row += 1; }
             }
             b'0' => { self.cursor_col = 0; }
@@ -225,6 +225,19 @@ impl Editor {
                 self.mode = Mode::Normal;
                 if self.cursor_col > 0 { self.cursor_col -= 1; }
                 self.set_status(b"");
+            }
+            0x80 => { /* ↑ in insert mode */
+                if self.cursor_row > 0 { self.cursor_row -= 1; }
+            }
+            0x81 => { /* ↓ in insert mode */
+                if self.cursor_row + 1 < self.buf.count { self.cursor_row += 1; }
+            }
+            0x82 => { /* ← in insert mode */
+                if self.cursor_col > 0 { self.cursor_col -= 1; }
+            }
+            0x83 => { /* → in insert mode */
+                let len = self.buf.line_len(self.cursor_row);
+                if len > 0 && self.cursor_col < len { self.cursor_col += 1; }
             }
             0x0d | b'\n' => {
                 // Enter

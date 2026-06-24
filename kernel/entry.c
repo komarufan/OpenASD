@@ -17,6 +17,7 @@
 #include "drv/virtio_blk.h"
 #include "drv/virtio_net.h"
 #include "net/net.h"
+#include "net/tls.h"
 #include "drv/ps2kbd.h"
 #include "block/block.h"
 #include "block/gpt.h"
@@ -146,7 +147,7 @@ static int try_mount_fat_volume(block_dev_t *d0, uint64_t lba, uint64_t sectors,
  */
 static void seed_asdsh_into_vfs(void) {
     const char *bins[] = {
-        "asdsh", "mifetch", "hx", "ls", "cat", "mkdir", "rm", "touch",
+        "asdsh", "hx", "ls", "cat", "mkdir", "rm", "touch",
         "echo", "pwd", "sysinfo", "uname", "uptime", "id", "whoami",
         "kill", "hexdump", "wc", "ping", "filetest", "nettest", "hxtest",
         "grep", "find", "sort", "head", "tail", "do", "apm", NULL
@@ -406,6 +407,7 @@ void kernel_main_body(asd_bib_t *bib, uint64_t magic) {
     serial_puts("  [x] network\n");
     virtio_net_init();
     net_init();
+    net_tls_init();
     {
         int n = block_count();
         serial_puts("    found=");

@@ -64,7 +64,7 @@
 #define PKG_VER_LEN      32
 #define PKG_DESC_LEN     256
 #define PKG_CKSUM_LEN    80
-#define URL_LEN          512
+#define URL_LEN          2048
 #define PATH_LEN         256
 #define LINE_LEN         512
 
@@ -118,6 +118,15 @@ static void errn(const char *s) {
     asd_write(2, s, (size_t)n); asd_write(2, "\n", 1);
 }
 
+/* ANSI colours */
+#define C_RESET  "\x1b[0m"
+#define C_BOLD   "\x1b[1m"
+#define C_GREEN  "\x1b[1;32m"
+#define C_CYAN   "\x1b[1;36m"
+#define C_YELLOW "\x1b[1;33m"
+#define C_RED    "\x1b[1;31m"
+#define C_DIM    "\x1b[2m"
+
 static void outnum(long n) {
     char buf[24]; int i = 24; int neg = n < 0;
     if (neg) n = -n;
@@ -131,6 +140,37 @@ static void outsz(long bytes) {
     if (bytes < 1024) { outnum(bytes); out(" B"); }
     else if (bytes < 1024*1024) { outnum(bytes/1024); out(" KiB"); }
     else { outnum(bytes/(1024*1024)); out(" MiB"); }
+}
+
+/* ── progress bar (xbps-style) ──────────────────────────────────────────
+ * Prints: label [████████████--------] 62%  123 KiB
+ * Call with known = 0 to show spinner during header fetch.
+ * ─────────────────────────────────────────────────────────────────────*/
+#define PBAR_WIDTH 30
+
+static void draw_progress(const char *label, long done, long total) {
+    (void)total;
+    out("\x1b[2K\r");
+    out(C_BOLD); out(label); out(C_RESET " [");
+    /* grow 1 char per KiB, capped at PBAR_WIDTH */
+    int filled = (int)(done / 1024);
+    if (filled > PBAR_WIDTH) filled = PBAR_WIDTH;
+    out(C_GREEN);
+    for (int i = 0; i < filled; i++)          out("#");
+    out(C_RESET);
+    for (int i = filled; i < PBAR_WIDTH; i++) out("-");
+    out("] ");
+    outsz(done);
+}
+
+static void finish_progress(const char *label, long total) {
+    out("\x1b[2K\r");
+    out(C_GREEN C_BOLD); out(label); out(C_RESET " [");
+    out(C_GREEN);
+    for (int i = 0; i < PBAR_WIDTH; i++) out("#");
+    out(C_RESET "] ");
+    outsz(total);
+    out("\n");
 }
 
 /* ================================================================
@@ -273,7 +313,7 @@ static int kv_get(const char *data, const char *key, char *out_val, int out_max)
         if (spfx(p, key) && p[kl] == '=') {
             p += kl + 1;
             int i = 0;
-            while (*p && *p != '\n' && i < out_max - 1)
+            while (*p && *p != '\n' && *p != '\r' && i < out_max - 1)
                 out_val[i++] = *p++;
             out_val[i] = 0;
             return 1;
@@ -515,7 +555,9 @@ static const char *idx_next_record(const char *pos, char *rec, int rec_max) {
             rec[i] = 0;
             return pos;
         }
-        if (i < rec_max - 1) rec[i++] = *pos;
+        if (*pos != '\r') {  /* skip CR in CRLF line endings */
+            if (i < rec_max - 1) rec[i++] = *pos;
+        }
         pos++;
     }
     rec[i] = 0;
@@ -556,17 +598,21 @@ static void idx_load_all(void) {
  * Supports http://host/path (no HTTPS — no TLS in v1).
  * ================================================================ */
 
-/* Parse "http://host[:port]/path" into components.
- * Returns 0 on success. */
+/* Parse "http[s]://host[:port]/path" into components.
+ * Returns 0 on success. Sets *is_tls=1 for https. */
 static int url_parse(const char *url,
                      char *host, int host_max,
-                     uint16_t *port_out,
+                     uint16_t *port_out, int *is_tls,
                      char *path, int path_max) {
-    if (!spfx(url, "http://")) {
-        errn("apm: only http:// URLs are supported (no HTTPS in v1)");
+    const char *p;
+    if (spfx(url, "https://")) {
+        *is_tls = 1; *port_out = 443; p = url + 8;
+    } else if (spfx(url, "http://")) {
+        *is_tls = 0; *port_out = 80;  p = url + 7;
+    } else {
+        errn("apm: URL must start with http:// or https://");
         return -1;
     }
-    const char *p = url + 7;  /* skip "http://" */
 
     /* host */
     int hi = 0;
@@ -574,13 +620,12 @@ static int url_parse(const char *url,
         host[hi++] = *p++;
     host[hi] = 0;
 
-    /* optional port */
-    *port_out = 80;
+    /* optional port override (e.g. http://host:8080/path) */
     if (*p == ':') {
         p++;
         uint16_t pt = 0;
         while (*p >= '0' && *p <= '9') { pt = (uint16_t)(pt * 10 + (*p - '0')); p++; }
-        *port_out = pt;
+        if (pt) *port_out = pt;
     }
 
     /* path */
@@ -594,126 +639,222 @@ static int url_parse(const char *url,
     return 0;
 }
 
+/* Resolve relative Location header against current URL */
+static void resolve_location(const char *base_url, const char *loc,
+                             char *out, int max) {
+    if (spfx(loc, "http://") || spfx(loc, "https://")) {
+        scopy(out, loc, max); return;
+    }
+    /* Relative: take scheme + host from base, append loc */
+    scopy(out, base_url, max);
+    for (int i = slen(out) - 1; i >= 0; i--) {
+        if (out[i] == '/') { out[i+1] = 0; break; }
+    }
+    if (loc[0] == '/') {
+        int slashes = 0, host_end = 0;
+        for (int i = 0; out[i]; i++) {
+            if (out[i] == '/') slashes++;
+            if (slashes == 3) { host_end = i; break; }
+        }
+        if (host_end) out[host_end] = 0;
+    }
+    scat(out, loc, max);
+}
+
 /* HTTP/1.0 GET — downloads URL content into dest_path.
+ * Supports http:// and https:// (TLS 1.3).
+ * Follows up to 5 redirects (3xx with Location header).
  * Returns 0 on success. */
-static int http_get(const char *url, const char *dest_path) {
-    char host[256], path[512];
-    uint16_t port = 80;
+static int http_get(const char *url, const char *dest_path, const char *label) {
+    char cur_url[URL_LEN];
+    scopy(cur_url, url, URL_LEN);
+    int redirects = 0;
 
-    if (url_parse(url, host, sizeof(host), &port, path, sizeof(path)) != 0)
-        return -1;
+    for (;;) {
+        char host[256], path[URL_LEN];
+        uint16_t port = 80;
+        int is_tls = 0;
 
-    out("  Resolving "); outn(host);
-    uint32_t ip = 0;
-    if (asd_dns_resolve(host, &ip) != 0) {
-        errn("apm: DNS resolution failed");
-        return -1;
-    }
+        if (url_parse(cur_url, host, sizeof(host), &port, &is_tls, path, sizeof(path)) != 0)
+            return -1;
 
-    out("  Connecting to ");
-    /* print IP */
-    {
-        char ipbuf[24];
-        ipbuf[0] = 0;
-        long a = (ip >> 24) & 0xFF, b = (ip >> 16) & 0xFF,
-             c = (ip >>  8) & 0xFF, d =  ip        & 0xFF;
-        char tmp[8];
-        snum(tmp, a, 8); scat(ipbuf, tmp, 24); scat(ipbuf, ".", 24);
-        snum(tmp, b, 8); scat(ipbuf, tmp, 24); scat(ipbuf, ".", 24);
-        snum(tmp, c, 8); scat(ipbuf, tmp, 24); scat(ipbuf, ".", 24);
-        snum(tmp, d, 8); scat(ipbuf, tmp, 24);
-        out(ipbuf);
-    }
-    out(":"); outnum(port); asd_write(1, "\n", 1);
+        uint32_t ip = 0;
+        if (asd_dns_resolve(host, &ip) != 0) {
+            errn("apm: DNS resolution failed");
+            return -1;
+        }
 
-    int conn = -1;
-    if (asd_tcp_connect(ip, port, &conn) != 0) {
-        errn("apm: TCP connect failed");
-        return -1;
-    }
+        int tcp_conn = -1;
+        if (asd_tcp_connect(ip, port, &tcp_conn) != 0) {
+            errn("apm: TCP connect failed"); return -1;
+        }
 
-    /* Build HTTP/1.0 request */
-    char req[512];
-    req[0] = 0;
-    scopy(req, "GET ", 512); scat(req, path,  512);
-    scat(req, " HTTP/1.0\r\nHost: ", 512); scat(req, host, 512);
-    scat(req, "\r\nUser-Agent: apm/1.0\r\nConnection: close\r\n\r\n", 512);
+        int tls_conn = -1;
+        if (is_tls) {
+            tls_conn = asd_tls_connect(tcp_conn, host);
+            if (tls_conn < 0) {
+                errn("apm: TLS handshake failed");
+                asd_tcp_close(tcp_conn); return -1;
+            }
+        }
 
-    if (asd_tcp_send(conn, req, (size_t)slen(req)) < 0) {
-        errn("apm: HTTP send failed"); asd_tcp_close(conn); return -1;
-    }
+        /* Build HTTP/1.0 GET request */
+        char req[4096]; req[0] = 0;
+        scopy(req, "GET ", sizeof(req)); scat(req, path, sizeof(req));
+        scat(req, " HTTP/1.0\r\nHost: ", sizeof(req)); scat(req, host, sizeof(req));
+        scat(req, "\r\nUser-Agent: apm/1.0\r\nConnection: close\r\n\r\n", sizeof(req));
 
-    /* Read response — skip HTTP headers, write body to file */
-    static char recv_buf[8192];
-    int fd = asd_open(dest_path, O_WRONLY | O_CREAT | O_TRUNC);
-    if (fd < 0) { errn("apm: cannot create dest file"); asd_tcp_close(conn); return -1; }
+        int send_ok;
+        if (is_tls) send_ok = (asd_tls_send(tls_conn, req, (size_t)slen(req)) >= 0);
+        else         send_ok = (asd_tcp_send(tcp_conn, req, (size_t)slen(req)) >= 0);
 
-    int header_done = 0;
-    long body_bytes = 0;
-    static char leftover[4096];
-    int leftover_n = 0;
+        if (!send_ok) {
+            errn("apm: HTTP send failed");
+            if (is_tls) asd_tls_close(tls_conn);
+            asd_tcp_close(tcp_conn); return -1;
+        }
 
-    while (1) {
-        long n = asd_tcp_recv(conn, recv_buf, sizeof(recv_buf), 1);
-        if (n <= 0) break;
+        /* Read response headers into buf, then process */
+        static char buf[16384];
+        int buf_n = 0;
+        int eoh = -1; /* position of \r\n\r\n */
+        int status_code = 0;
+        char location[URL_LEN]; location[0] = 0;
 
-        const char *data = recv_buf;
-        int dlen = (int)n;
+        while (eoh < 0) {
+            long n = is_tls
+                     ? asd_tls_recv(tls_conn, buf + buf_n, (size_t)(sizeof(buf) - 1 - buf_n), 1)
+                     : asd_tcp_recv(tcp_conn, buf + buf_n, (size_t)(sizeof(buf) - 1 - buf_n), 1);
+            if (n <= 0) break;
+            buf_n += (int)n;
+            buf[buf_n] = 0;
+            /* search for \r\n\r\n */
+            for (int i = 0; i < buf_n - 3; i++) {
+                if (buf[i] == '\r' && buf[i+1] == '\n' &&
+                    buf[i+2] == '\r' && buf[i+3] == '\n') {
+                    eoh = i; break;
+                }
+            }
+        }
 
-        if (!header_done) {
-            /* Accumulate until we see \r\n\r\n */
-            int copy = dlen < (int)(sizeof(leftover) - leftover_n - 1)
-                       ? dlen : (int)(sizeof(leftover) - leftover_n - 1);
-            for (int i = 0; i < copy; i++) leftover[leftover_n++] = data[i];
-            leftover[leftover_n] = 0;
+        if (eoh < 0) {
+            errn("apm: incomplete HTTP response (no headers)");
+            if (is_tls) asd_tls_close(tls_conn);
+            asd_tcp_close(tcp_conn); return -1;
+        }
 
-            /* Find end of headers */
-            for (int i = 0; i < leftover_n - 3; i++) {
-                if (leftover[i] == '\r' && leftover[i+1] == '\n' &&
-                    leftover[i+2] == '\r' && leftover[i+3] == '\n') {
-                    /* Check HTTP status */
-                    if (!spfx(leftover, "HTTP/1.") || leftover[9] != '2') {
-                        /* Extract status line for error message */
-                        int sl = 0;
-                        while (sl < 64 && leftover[sl] && leftover[sl] != '\r') sl++;
-                        char status[65]; for (int j = 0; j < sl; j++) status[j] = leftover[j];
-                        status[sl] = 0;
-                        errn(status);
-                        asd_close(fd); asd_tcp_close(conn);
-                        return -1;
-                    }
-                    /* Write body part that was already buffered */
-                    int body_start = i + 4;
-                    int body_in_buf = leftover_n - body_start;
-                    if (body_in_buf > 0) {
-                        asd_write(fd, leftover + body_start, (size_t)body_in_buf);
-                        body_bytes += body_in_buf;
-                    }
-                    /* Remaining bytes from current recv */
-                    int already = copy - (leftover_n - (i + 4) < 0 ? 0 : leftover_n - (i+4));
-                    if (already < dlen) {
-                        int rest = dlen - already;
-                        if (rest > 0) { asd_write(fd, data + already, (size_t)rest); body_bytes += rest; }
-                    }
-                    header_done = 1;
+        /* Parse status code: "HTTP/1.x NNN" — digits at positions 9,10,11 */
+        if (buf_n > 12 && spfx(buf, "HTTP/1."))
+            status_code = (buf[9]-'0')*100 + (buf[10]-'0')*10 + (buf[11]-'0');
+
+        if (status_code == 0) {
+            errn("apm: bad HTTP status line");
+            if (is_tls) asd_tls_close(tls_conn);
+            asd_tcp_close(tcp_conn); return -1;
+        }
+
+        /* Parse Location header for redirects — search within headers only */
+        if (status_code >= 300 && status_code < 400) {
+            /* Null-terminate just the headers section for safe search */
+            char saved = buf[eoh]; buf[eoh] = 0;
+            const char *p = buf;
+            while (*p) {
+                /* advance to start of next line */
+                while (*p && *p != '\n') p++;
+                if (*p == '\n') p++;
+                /* skip leading whitespace (some servers indent headers) */
+                while (*p == ' ' || *p == '\t') p++;
+                /* case-insensitive match for "location:" */
+                if ((p[0]=='L'||p[0]=='l') &&
+                    (p[1]=='o'||p[1]=='O') &&
+                    (p[2]=='c'||p[2]=='C') &&
+                    (p[3]=='a'||p[3]=='A') &&
+                    (p[4]=='t'||p[4]=='T') &&
+                    (p[5]=='i'||p[5]=='I') &&
+                    (p[6]=='o'||p[6]=='O') &&
+                    (p[7]=='n'||p[7]=='N') &&
+                    (p[8]==':')) {
+                    p += 9;
+                    while (*p == ' ' || *p == '\t') p++;
+                    int li = 0;
+                    while (*p && *p != '\r' && *p != '\n' && li < URL_LEN-1)
+                        location[li++] = *p++;
+                    location[li] = 0;
                     break;
                 }
             }
-        } else {
-            asd_write(fd, data, (size_t)dlen);
-            body_bytes += dlen;
+            buf[eoh] = saved;
         }
-    }
 
-    asd_close(fd);
-    asd_tcp_close(conn);
+        /* Handle redirect */
+        if (status_code >= 300 && status_code < 400) {
+            if (redirects >= 5) {
+                errn("apm: too many redirects");
+                if (is_tls) asd_tls_close(tls_conn);
+                asd_tcp_close(tcp_conn); return -1;
+            }
+            if (!location[0]) {
+                errn("apm: redirect with no Location header");
+                if (is_tls) asd_tls_close(tls_conn);
+                asd_tcp_close(tcp_conn); return -1;
+            }
+            char new_url[URL_LEN];
+            resolve_location(cur_url, location, new_url, URL_LEN);
+            out("  -> "); outnum(status_code); out(" "); outn(new_url);
+            redirects++;
+            scopy(cur_url, new_url, URL_LEN);
+            if (is_tls) asd_tls_close(tls_conn);
+            asd_tcp_close(tcp_conn);
+            continue;
+        }
 
-    if (body_bytes == 0) {
-        errn("apm: empty response body");
-        return -1;
+        /* Handle non-2xx error */
+        if (status_code < 200 || status_code >= 300) {
+            int sl = 0;
+            while (sl < 64 && buf[sl] && buf[sl] != '\r') sl++;
+            if (sl > 0) { char st[65]; for(int j=0;j<sl;j++)st[j]=buf[j]; st[sl]=0; errn(st); }
+            if (is_tls) asd_tls_close(tls_conn);
+            asd_tcp_close(tcp_conn); return -1;
+        }
+
+        /* 2xx: write body to file */
+        int fd = asd_open(dest_path, O_WRONLY | O_CREAT | O_TRUNC);
+        if (fd < 0) {
+            errn("apm: cannot create dest file");
+            if (is_tls) asd_tls_close(tls_conn);
+            asd_tcp_close(tcp_conn); return -1;
+        }
+
+        long body_bytes = 0;
+        int body_start = eoh + 4;
+        if (body_start < buf_n) {
+            int nb = buf_n - body_start;
+            asd_write(fd, buf + body_start, (size_t)nb);
+            body_bytes += nb;
+        }
+
+        /* Drain remaining body data */
+        while (1) {
+            long n = is_tls
+                     ? asd_tls_recv(tls_conn, buf, sizeof(buf), 1)
+                     : asd_tcp_recv(tcp_conn, buf, sizeof(buf), 1);
+            if (n <= 0) break;
+            asd_write(fd, buf, (size_t)n);
+            body_bytes += n;
+            draw_progress(label, body_bytes, -1);
+        }
+
+        asd_close(fd);
+        if (is_tls) asd_tls_close(tls_conn);
+        asd_tcp_close(tcp_conn);
+
+        if (body_bytes == 0) {
+            errn("\napm: empty response body");
+            return -1;
+        }
+        finish_progress(label, body_bytes);
+        return 0;
     }
-    out("  Downloaded "); outsz(body_bytes); asd_write(1, "\n", 1);
-    return 0;
 }
 
 /* ================================================================
@@ -826,12 +967,12 @@ static int install_deps(PkgInfo *p, int dry_run) {
 static int cmd_update(void) {
     if (g_cfg.nrepos == 0) {
         errn("apm: no repositories configured.");
-        errn("     Edit /etc/apm/apm.conf and uncomment a 'repo' line.");
+        errn("     Edit /etc/apm/apm.conf and add a 'repo' line.");
         return 1;
     }
 
     mkdir_p(APM_LISTS_DIR);
-    out("Syncing package indexes...\n");
+    out(C_BOLD "==> " C_RESET "Syncing package indexes\n");
 
     for (int ri = 0; ri < g_cfg.nrepos; ri++) {
         Repo *r = &g_cfg.repos[ri];
@@ -845,17 +986,14 @@ static int cmd_update(void) {
         scat(idx_path, r->name, PATH_LEN);
         scat(idx_path, ".idx", PATH_LEN);
 
-        out("  Fetching ["); out(r->name); out("] "); outn(idx_url);
+        out(C_BOLD "Fetching" C_RESET " ["); out(r->name); outn("] index...");
 
-        if (http_get(idx_url, idx_path) != 0) {
-            errn("apm: failed to fetch index (network unavailable)");
-            errn("     You can manually place the index at:");
-            out("     "); outn(idx_path);
+        if (http_get(idx_url, idx_path, "index.idx") != 0) {
+            errn("\napm: failed to fetch index");
             return 1;
         }
-        outn("  OK");
     }
-    outn("Package indexes up to date.");
+    out(C_GREEN C_BOLD "==> " C_RESET "Package indexes up to date.\n");
     return 0;
 }
 
@@ -865,7 +1003,7 @@ static int cmd_update(void) {
 
 static int install_package(const char *name, int dry_run) {
     if (db_installed(name)) {
-        out("[already installed] "); outn(name);
+        out(C_DIM "[already installed] " C_RESET); outn(name);
         return 0;
     }
 
@@ -878,8 +1016,9 @@ static int install_package(const char *name, int dry_run) {
     /* Install dependencies first */
     if (install_deps(&p, dry_run) != 0) return -1;
 
-    out("Installing "); out(p.name); out("-"); out(p.version);
-    out(" ["); outsz(p.installed_size); out(" installed]\n");
+    out(C_BOLD "==> " C_RESET "Installing " C_CYAN);
+    out(p.name); out("-"); out(p.version);
+    out(C_RESET " ("); outsz(p.installed_size); out(")\n");
     if (dry_run) return 0;
 
     /* Check cache */
@@ -903,14 +1042,13 @@ static int install_package(const char *name, int dry_run) {
             }
         }
         if (!found_repo) { errn("apm: cannot find repo URL"); return -1; }
-        out("  Downloading "); outn(dl_url);
-        if (http_get(dl_url, cache_path) != 0) return -1;
+        if (http_get(dl_url, cache_path, p.filename) != 0) return -1;
     } else {
         out("  Using cached archive: "); outn(cache_path);
     }
 
     /* Extract archive */
-    out("  Extracting... ");
+    out("    Extracting... ");
     if (apkg_extract(cache_path, &p) != 0) return -1;
     outn("done");
 
@@ -920,7 +1058,8 @@ static int install_package(const char *name, int dry_run) {
         return -1;
     }
 
-    out("[installed] "); out(p.name); out("-"); outn(p.version);
+    out(C_GREEN C_BOLD "[installed] " C_RESET);
+    out(p.name); out("-"); outn(p.version);
     return 0;
 }
 

@@ -96,4 +96,6 @@ void *amm_virt_to_kva(vmap_t *map, vaddr_t va);
 void *kmalloc(size_t size);
 void  kfree(void *ptr);
 
+void mm_get_meminfo(uint64_t *total_bytes, uint64_t *free_bytes);
+
 #endif

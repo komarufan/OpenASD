@@ -733,11 +733,7 @@ static void deploy_directory_structure(const char *user_name) {
             static const char *conf =
                 "# apm.conf - ASD Package Manager 1.0 configuration\n"
                 "#\n"
-                "# Repository format:\n"
-                "#   repo <name> <url>\n"
-                "#\n"
-                "# Uncomment to enable the official repository:\n"
-                "# repo official https://github.com/komarufan/OpenASD-packages/releases/latest/download\n"
+                "repo official https://github.com/komarufan/OpenASD-packages/releases/latest/download\n"
                 "#\n"
                 "arch=x86_64\n";
             vfs_write(fd, conf, strlen(conf));

@@ -28,6 +28,7 @@
 #include "macho.h"
 #include "gdt.h"
 #include "../net/net.h"
+#include "../net/tls.h"
 #include "../vfs/vfs.h"
 #include "../ipc/ringbuf.h"
 #include "../sched/sched.h"
@@ -1144,6 +1145,74 @@ uint64_t syscall_dispatch(uint64_t nr,
     case SYS_TCP_RECV:     return sys_tcp_recv(a0, a1, a2, a3);
     case SYS_TCP_CLOSE:    return sys_tcp_close(a0);
     case SYS_DNS_RESOLVE:  return sys_dns_resolve(a0, a1);
+    case SYS_TLS_CONNECT: {
+        char host[256];
+        if(copy_user_cstr(host,sizeof(host),(const char*)(uintptr_t)a1,256)!=0) return ESYS_FAULT;
+        int r=net_tls_connect((int)a0,host);
+        return (uint64_t)(int64_t)r;
+    }
+    case SYS_TLS_SEND: {
+        if(a2==0) return 0;
+        if(!validate_user_ptr((void*)(uintptr_t)a1,(size_t)a2)) return ESYS_FAULT;
+        static uint8_t kbuf[4096];
+        size_t done=0;
+        while(done<(size_t)a2){
+            size_t chunk=(size_t)a2-done;
+            if(chunk>sizeof(kbuf))chunk=sizeof(kbuf);
+            if(copy_from_user(kbuf,(const uint8_t*)(uintptr_t)a1+done,chunk)!=0) return ESYS_FAULT;
+            int r=net_tls_send((int)a0,kbuf,(uint32_t)chunk);
+            if(r<0) return (uint64_t)(int64_t)(done>0?(long)done:-1LL);
+            done+=chunk;
+        }
+        return (uint64_t)done;
+    }
+    case SYS_TLS_RECV: {
+        if(a2==0) return 0;
+        if(!validate_user_ptr((void*)(uintptr_t)a1,(size_t)a2)) return ESYS_FAULT;
+        static uint8_t kbuf[4096];
+        size_t chunk=a2<sizeof(kbuf)?a2:sizeof(kbuf);
+        int r=net_tls_recv((int)a0,kbuf,(uint32_t)chunk,(int)a3);
+        if(r<0) return (uint64_t)(int64_t)-1LL;
+        if(r==0) return 0;
+        if(copy_to_user((void*)(uintptr_t)a1,kbuf,(size_t)r)!=0) return ESYS_FAULT;
+        return (uint64_t)r;
+    }
+    case SYS_TLS_CLOSE:  net_tls_close((int)a0); return 0;
+    case SYS_MEMINFO: {
+        if (!validate_user_ptr((void*)(uintptr_t)a0, 8)) return ESYS_FAULT;
+        if (!validate_user_ptr((void*)(uintptr_t)a1, 8)) return ESYS_FAULT;
+        uint64_t total = 0, free_b = 0;
+        mm_get_meminfo(&total, &free_b);
+        uint64_t total_kb = total / 1024;
+        uint64_t used_kb  = (total - free_b) / 1024;
+        if (copy_to_user((void*)(uintptr_t)a0, &total_kb, 8) != 0) return ESYS_FAULT;
+        if (copy_to_user((void*)(uintptr_t)a1, &used_kb,  8) != 0) return ESYS_FAULT;
+        return 0;
+    }
+    case SYS_GETUSERNAME: {
+        void *ubuf = (void *)(uintptr_t)a0;
+        size_t usize = (size_t)a1;
+        if (usize == 0) return 0;
+        if (!validate_user_ptr(ubuf, usize)) return ESYS_FAULT;
+        pcb_t *cur_p = sched_current();
+        uint32_t uid = cur_p ? cur_p->uid : 0;
+        const char *uname = NULL;
+        if (uid == 0) {
+            uname = "root";
+        } else {
+            asd_user_t *u = usr_find_by_uid(uid);
+            if (u) uname = u->name;
+        }
+        if (!uname) uname = "user";
+        static char kname[64];
+        size_t i = 0;
+        while (uname[i] && i < sizeof(kname) - 1) { kname[i] = uname[i]; i++; }
+        kname[i] = '\0';
+        size_t copy_len = i + 1 < usize ? i + 1 : usize;
+        kname[copy_len - 1] = '\0';
+        if (copy_to_user(ubuf, kname, copy_len) != 0) return ESYS_FAULT;
+        return 0;
+    }
     default:               return ESYS_NOSYS;
     }
 }

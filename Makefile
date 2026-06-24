@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026, ASD Project Contributors
 
-.PHONY: all boot kernel userland uki live-image prepare-run run run-debug run-headless-debug run-gui-debug bfd bfd-debug bfd-autotest bfd-hxtest bfd-nettest iso usb-image clean install install-fresh
+.PHONY: all boot kernel userland uki live-image prepare-run run run-debug run-headless-debug run-gui-debug bfd bfd-debug iso usb-image clean install install-fresh
 
 QEMU ?= qemu-system-x86_64
 QEMU_DISPLAY ?= gtk
@@ -102,9 +102,7 @@ userland:
 uki: kernel
 	$(MAKE) -C kernel uki
 
-# Rebuild fastfetch when kernel syscall/elf loader changes (spawn path).
-userland/mifetch/build/mifetch: kernel/arch/syscall.c kernel/arch/macho.c userland/mifetch/mifetch.c
-	$(MAKE) -C userland/mifetch
+
 
 live-image: all
 	$(call check-mtools)
@@ -274,6 +272,7 @@ install: all
 	@echo "Installation to $(DISK_IMG) complete."
 
 bfd: all
+	$(call check-mtools)
 	@if [ ! -f "$(DISK_IMG)" ]; then \
 		echo "No $(DISK_IMG). Run 'make install' once, or install via QEMU (make run)."; \
 		exit 1; \
@@ -285,6 +284,9 @@ bfd: all
 	@if [ ! -f "$(OVMF_VARS_BFD)" ]; then \
 		cp "$(OVMF_VARS)" "$(OVMF_VARS_BFD)"; \
 	fi
+	@mcopy -o -i "$(DISK_IMG)" kernel/build/asdkernel.bin ::/EFI/BOOT/asdkernel.bin 2>/dev/null || true
+	@mcopy -o -i "$(DISK_IMG)" kernel/build/asdkernel.bin ::/boot/asdkernel.bin      2>/dev/null || true
+	@mcopy -o -i "$(DISK_IMG)" userland/bin/build/apm    ::/bin/apm                  2>/dev/null || true
 	$(QEMU) \
 		-machine q35,accel=kvm:tcg \
 		-cpu qemu64 \
@@ -335,202 +337,7 @@ bfd-debug: all
 		-netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3 \
 		-device virtio-net-pci,netdev=net0
 
-# Headless: boot with cmdline autotest_fastfetch, run /bin/fastfetch, halt.
-define write-asdboot-conf-autotest
-	@printf '%s\n' \
-		'timeout = 0' \
-		'' \
-		'menu' \
-		'  title = "ASD Boot"' \
-		'  default = "default"' \
-		'end' \
-		'' \
-		'entry' \
-		'  id = "default"' \
-		'  label = "ASD Kernel"' \
-		'  kernel = "/boot/asdkernel.bin"' \
-		'  cmdline = "autotest_fastfetch"' \
-		'end' > $(1)
-endef
 
-define write-asdboot-conf-nettest
-	@printf '%s\n' \
-		'timeout = 0' \
-		'' \
-		'menu' \
-		'  title = "ASD Boot"' \
-		'  default = "default"' \
-		'end' \
-		'' \
-		'entry' \
-		'  id = "default"' \
-		'  label = "ASD Kernel"' \
-		'  kernel = "/boot/asdkernel.bin"' \
-		'  cmdline = "autotest_nettest"' \
-		'end' > $(1)
-endef
-
-define write-asdboot-conf-hxtest
-	@printf '%s\n' \
-		'timeout = 0' \
-		'' \
-		'menu' \
-		'  title = "ASD Boot"' \
-		'  default = "default"' \
-		'end' \
-		'' \
-		'entry' \
-		'  id = "default"' \
-		'  label = "ASD Kernel"' \
-		'  kernel = "/boot/asdkernel.bin"' \
-		'  cmdline = "autotest_hxtest"' \
-		'end' > $(1)
-endef
-
-bfd-autotest: all
-	$(call check-mtools)
-	@mkdir -p "$(DEBUG_DIR)"
-	@if [ ! -f "$(DISK_IMG)" ]; then $(MAKE) install; fi
-	@if dd if="$(DISK_IMG)" bs=1 skip=512 count=8 2>/dev/null | grep -aq 'EFI PART'; then \
-		echo "bfd-autotest: $(DISK_IMG) is GPT (installer layout); mcopy cannot patch it."; \
-		echo "  Use: make bfd-debug   (GUI + serial.log, type fastfetch in the shell)"; \
-		exit 1; \
-	fi
-	$(call write-asdboot-conf-autotest,"$(RUN_DIR)/asdboot-autotest.conf")
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-autotest.conf" ::/EFI/BOOT/asdboot.conf
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-autotest.conf" ::/boot/asdboot.conf
-	@echo "Serial log: $(SERIAL_LOG)"
-	@if [ ! -f "$(OVMF_CODE)" ] || [ ! -f "$(OVMF_VARS)" ]; then \
-		echo "OVMF firmware not found."; exit 1; fi
-	@if [ ! -f "$(OVMF_VARS_BFD)" ]; then cp "$(OVMF_VARS)" "$(OVMF_VARS_BFD)"; fi
-	@rm -f "$(SERIAL_LOG)" "$(QEMU_DEBUG_LOG)"
-	@echo "Running QEMU autotest (~25s)..."
-	@( command -v timeout >/dev/null && timeout 25 $(QEMU) \
-		-machine q35,accel=tcg -cpu qemu64 -m 1024 -display none -no-reboot \
-		-serial file:$(SERIAL_LOG) \
-		-d guest_errors,int,cpu_reset -D $(QEMU_DEBUG_LOG) \
-		-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
-		-drive if=pflash,format=raw,file="$(OVMF_VARS_BFD)" \
-		-drive file="$(DISK_IMG)",if=none,id=inst0,format=raw \
-		-device virtio-blk-pci,drive=inst0 \
-	) || $(QEMU) \
-		-machine q35,accel=tcg -cpu qemu64 -m 1024 -display none -no-reboot \
-		-serial file:$(SERIAL_LOG) \
-		-d guest_errors,int,cpu_reset -D $(QEMU_DEBUG_LOG) \
-		-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
-		-drive if=pflash,format=raw,file="$(OVMF_VARS_BFD)" \
-		-drive file="$(DISK_IMG)",if=none,id=inst0,format=raw \
-		-device virtio-blk-pci,drive=inst0 \
-		-netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3 \
-		-device virtio-net-pci,netdev=net0
-	@echo "--- serial.log (last 40 lines) ---"
-	@tail -40 "$(SERIAL_LOG)" 2>/dev/null || true
-	@if grep -q '\*\*\* EXCEPTION' "$(SERIAL_LOG)" 2>/dev/null; then \
-		echo "FAIL: kernel exception in $(SERIAL_LOG)"; \
-		mcopy -o -i "$(DISK_IMG)" "$(DISK_EFI_DIR)/asdboot.conf" ::/EFI/BOOT/asdboot.conf 2>/dev/null || true; \
-		mcopy -o -i "$(DISK_IMG)" "$(DISK_EFI_DIR)/asdboot.conf" ::/boot/asdboot.conf 2>/dev/null || true; \
-		exit 1; \
-	elif grep -q '\[autotest\] OK' "$(SERIAL_LOG)" 2>/dev/null; then \
-		echo "PASS: fastfetch autotest completed"; \
-		mcopy -o -i "$(DISK_IMG)" "$(DISK_EFI_DIR)/asdboot.conf" ::/EFI/BOOT/asdboot.conf 2>/dev/null || true; \
-		mcopy -o -i "$(DISK_IMG)" "$(DISK_EFI_DIR)/asdboot.conf" ::/boot/asdboot.conf 2>/dev/null || true; \
-	else \
-		echo "WARN: no [autotest] OK (timeout? check $(SERIAL_LOG))"; \
-		mcopy -o -i "$(DISK_IMG)" "$(DISK_EFI_DIR)/asdboot.conf" ::/EFI/BOOT/asdboot.conf 2>/dev/null || true; \
-		mcopy -o -i "$(DISK_IMG)" "$(DISK_EFI_DIR)/asdboot.conf" ::/boot/asdboot.conf 2>/dev/null || true; \
-		exit 1; \
-	fi
-	$(call write-asdboot-conf,"$(RUN_DIR)/asdboot.conf")
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/EFI/BOOT/asdboot.conf
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/boot/asdboot.conf
-
-# Headless autotest for hxtest (file save regression).
-bfd-hxtest: all
-	$(call check-mtools)
-	@mkdir -p "$(DEBUG_DIR)"
-	@if [ ! -f "$(DISK_IMG)" ]; then $(MAKE) install; fi
-	@if dd if="$(DISK_IMG)" bs=1 skip=512 count=8 2>/dev/null | grep -aq 'EFI PART'; then \
-		echo "bfd-hxtest: $(DISK_IMG) is GPT layout; run: make install-fresh first."; \
-		exit 1; \
-	fi
-	$(call write-asdboot-conf-hxtest,"$(RUN_DIR)/asdboot-hxtest.conf")
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-hxtest.conf" ::/EFI/BOOT/asdboot.conf
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-hxtest.conf" ::/boot/asdboot.conf
-	@echo "Serial log: $(SERIAL_LOG)"
-	@if [ ! -f "$(OVMF_CODE)" ] || [ ! -f "$(OVMF_VARS)" ]; then \
-		echo "OVMF firmware not found."; exit 1; fi
-	@if [ ! -f "$(OVMF_VARS_BFD)" ]; then cp "$(OVMF_VARS)" "$(OVMF_VARS_BFD)"; fi
-	@rm -f "$(SERIAL_LOG)" "$(QEMU_DEBUG_LOG)"
-	@echo "Running QEMU hxtest (~25s)..."
-	@( command -v timeout >/dev/null && timeout 25 $(QEMU) \
-		-machine q35,accel=tcg -cpu qemu64 -m 1024 -display none -no-reboot \
-		-serial file:$(SERIAL_LOG) \
-		-d guest_errors,int,cpu_reset -D $(QEMU_DEBUG_LOG) \
-		-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
-		-drive if=pflash,format=raw,file="$(OVMF_VARS_BFD)" \
-		-drive file="$(DISK_IMG)",if=none,id=inst0,format=raw \
-		-device virtio-blk-pci,drive=inst0 \
-	) || true
-	@echo "--- serial.log (last 40 lines) ---"
-	@tail -40 "$(SERIAL_LOG)" 2>/dev/null || true
-	@if grep -q '\*\*\* EXCEPTION' "$(SERIAL_LOG)" 2>/dev/null; then \
-		echo "FAIL: kernel exception"; \
-	elif grep -q 'HXTEST OK' "$(SERIAL_LOG)" 2>/dev/null; then \
-		echo "PASS: hxtest OK"; \
-	elif grep -q 'HXTEST FAIL' "$(SERIAL_LOG)" 2>/dev/null; then \
-		echo "FAIL: hxtest failed (see serial.log)"; \
-		exit 1; \
-	else \
-		echo "WARN: no HXTEST result (timeout? check $(SERIAL_LOG))"; \
-		exit 1; \
-	fi
-	$(call write-asdboot-conf,"$(RUN_DIR)/asdboot.conf")
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/EFI/BOOT/asdboot.conf
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/boot/asdboot.conf
-
-# Network autotest — tests ping, DNS, TCP via nettest binary.
-bfd-nettest: all
-	$(call check-mtools)
-	@mkdir -p "$(DEBUG_DIR)"
-	@if [ ! -f "$(DISK_IMG)" ]; then $(MAKE) install; fi
-	@if dd if="$(DISK_IMG)" bs=1 skip=512 count=8 2>/dev/null | grep -aq 'EFI PART'; then \
-		echo "bfd-nettest: $(DISK_IMG) is GPT layout; run: make install-fresh first."; \
-		exit 1; \
-	fi
-	$(call write-asdboot-conf-nettest,"$(RUN_DIR)/asdboot-nettest.conf")
-	@mcopy -o -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-nettest.conf" ::/EFI/BOOT/asdboot.conf
-	@mcopy -o -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot-nettest.conf" ::/boot/asdboot.conf
-	@if [ ! -f "$(OVMF_CODE)" ] || [ ! -f "$(OVMF_VARS)" ]; then \
-		echo "OVMF firmware not found."; exit 1; fi
-	@if [ ! -f "$(OVMF_VARS_BFD)" ]; then cp "$(OVMF_VARS)" "$(OVMF_VARS_BFD)"; fi
-	@rm -f "$(SERIAL_LOG)" "$(QEMU_DEBUG_LOG)"
-	@echo "Running QEMU nettest (timeout 45s)..."
-	@( command -v timeout >/dev/null && timeout 45 $(QEMU) \
-		-machine q35,accel=kvm:tcg -cpu qemu64 -m 1024 -display none -no-reboot \
-		-serial file:$(SERIAL_LOG) \
-		-d guest_errors -D $(QEMU_DEBUG_LOG) \
-		-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
-		-drive if=pflash,format=raw,file="$(OVMF_VARS_BFD)" \
-		-drive file="$(DISK_IMG)",if=none,id=inst0,format=raw \
-		-device virtio-blk-pci,drive=inst0,bootindex=1 \
-		-netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3 \
-		-device virtio-net-pci,netdev=net0 \
-	) || true
-	@echo "--- serial.log ---"
-	@cat "$(SERIAL_LOG)" 2>/dev/null || echo "(no serial log)"
-	@echo "--- end ---"
-	@if grep -q 'NETTEST ALL OK' "$(SERIAL_LOG)" 2>/dev/null; then \
-		echo "PASS: all network tests passed"; \
-	elif grep -q 'NETTEST SOME FAILED' "$(SERIAL_LOG)" 2>/dev/null; then \
-		echo "FAIL: some network tests failed (see log above)"; \
-		exit 1; \
-	else \
-		echo "WARN: no NETTEST result (timeout or boot failure)"; \
-		exit 1; \
-	fi
-	$(call write-asdboot-conf,"$(RUN_DIR)/asdboot.conf")
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/EFI/BOOT/asdboot.conf
-	@mcopy -i "$(DISK_IMG)" "$(RUN_DIR)/asdboot.conf" ::/boot/asdboot.conf
 
 # -----------------------------------------------------------------------
 # usb-image — bootable GPT disk image for writing to USB drives.

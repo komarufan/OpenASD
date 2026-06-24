@@ -52,6 +52,7 @@ OBJS = \
     $(BUILD)/virtio_blk.o \
     $(BUILD)/virtio_net.o \
     $(BUILD)/net.o \
+    $(BUILD)/tls.o \
     $(BUILD)/usr.o \
     $(BUILD)/asdinit.o \
     $(BUILD)/init_io.o \
@@ -80,105 +81,108 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 # Compile kernel source files
-$(BUILD)/entry.o: entry.c | $(BUILD)
+$(BUILD)/entry.o: entry.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/fbcon.o: console/fbcon.c | $(BUILD)
+$(BUILD)/fbcon.o: console/fbcon.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/string.o: lib/string.c | $(BUILD)
+$(BUILD)/string.o: lib/string.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/mm.o: mm/mm.c | $(BUILD)
+$(BUILD)/mm.o: mm/mm.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/block.o: block/block.c | $(BUILD)
+$(BUILD)/block.o: block/block.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/gpt.o: block/gpt.c | $(BUILD)
+$(BUILD)/gpt.o: block/gpt.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/sched.o: sched/sched.c | $(BUILD)
+$(BUILD)/sched.o: sched/sched.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/sched_asm.o: sched/sched_asm.S | $(BUILD)
+$(BUILD)/sched_asm.o: sched/sched_asm.S  | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BUILD)/port.o: ipc/port.c | $(BUILD)
+$(BUILD)/port.o: ipc/port.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/vfs.o: vfs/vfs.c | $(BUILD)
+$(BUILD)/vfs.o: vfs/vfs.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/fat32.o: vfs/fat32.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/ffs.o: vfs/ffs.c | $(BUILD)
+$(BUILD)/ffs.o: vfs/ffs.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/ramfs.o: vfs/ramfs.c | $(BUILD)
+$(BUILD)/ramfs.o: vfs/ramfs.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/adf.o: drv/adf.c | $(BUILD)
+$(BUILD)/adf.o: drv/adf.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/virtio_blk.o: drv/virtio_blk.c | $(BUILD)
+$(BUILD)/virtio_blk.o: drv/virtio_blk.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/virtio_net.o: drv/virtio_net.c | $(BUILD)
+$(BUILD)/virtio_net.o: drv/virtio_net.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/net.o: net/net.c | $(BUILD)
+$(BUILD)/net.o: net/net.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/usr.o: usr/usr.c | $(BUILD)
+$(BUILD)/tls.o: net/tls.c  | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/usr.o: usr/usr.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Compile asdinit and sub-files (linked into kernel for bring-up)
-$(BUILD)/asdinit.o: ../init/asdinit.c | $(BUILD)
+$(BUILD)/asdinit.o: ../init/asdinit.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/init_io.o: ../init/io.c | $(BUILD)
+$(BUILD)/init_io.o: ../init/io.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/init_installer.o: ../init/installer.c | $(BUILD)
+$(BUILD)/init_installer.o: ../init/installer.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/init_installer_tui.o: ../init/installer_tui.c | $(BUILD)
+$(BUILD)/init_installer_tui.o: ../init/installer_tui.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/init_shell.o: ../init/shell.c | $(BUILD)
+$(BUILD)/init_shell.o: ../init/shell.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/init_svcmgr.o: ../init/svcmgr.c | $(BUILD)
+$(BUILD)/init_svcmgr.o: ../init/svcmgr.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Arch subsystem
-$(BUILD)/gdt.o: arch/gdt.c | $(BUILD)
+$(BUILD)/gdt.o: arch/gdt.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/idt.o: arch/idt.c | $(BUILD)
+$(BUILD)/idt.o: arch/idt.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/isr.o: arch/isr.S | $(BUILD)
+$(BUILD)/isr.o: arch/isr.S  | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BUILD)/pic.o: arch/pic.c | $(BUILD)
+$(BUILD)/pic.o: arch/pic.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/pit.o: arch/pit.c | $(BUILD)
+$(BUILD)/pit.o: arch/pit.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/syscall.o: arch/syscall.c | $(BUILD)
+$(BUILD)/syscall.o: arch/syscall.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/syscall_entry.o: arch/syscall_entry.S | $(BUILD)
+$(BUILD)/syscall_entry.o: arch/syscall_entry.S  | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BUILD)/macho.o: arch/macho.c | $(BUILD)
+$(BUILD)/macho.o: arch/macho.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/security.o: security/security.c | $(BUILD)
+$(BUILD)/security.o: security/security.c  | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Drivers

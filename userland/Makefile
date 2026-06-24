@@ -6,7 +6,7 @@ all:
 	$(MAKE) -C sbin
 	$(MAKE) -C sh
 	$(MAKE) -C drvmgr
-	$(MAKE) -C mifetch
+
 	$(MAKE) -C hx
 
 clean:

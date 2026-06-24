@@ -2,85 +2,30 @@
 """
 build_packages.py — Build .apkg archives and index.idx for OpenASD APM.
 
+Only mifetch and mitext are distributed as packages.
+All other utilities are built into the OS image directly.
+
 Usage (from repo root):
     python3 scripts/build_packages.py [--out <dir>]
 
-Output directory (default: build/packages/):
-    index.idx                        — repository package index
-    <name>-<version>-x86_64.apkg    — one archive per package
-
-Upload the contents of that directory to a GitHub Release tagged vX.Y,
-then set in /etc/apm/apm.conf:
-    repo official https://github.com/<user>/OpenASD-packages/releases/latest/download
+Output (default: build/packages/):
+    index.idx                     — repository package index
+    mifetch-1.0-x86_64.apkg
+    mitext-1.0-x86_64.apkg
 """
 
-import os, sys, struct, hashlib, json, time, argparse
+import os, sys, struct, hashlib, time, argparse
 
 ARCH    = "x86_64"
-VERSION = "1.0"   # bump when rebuilding packages
+VERSION = "1.0"
 
-# ── Package definitions ────────────────────────────────────────────────────────
-# Each entry: (name, install_path, source_path, description, depends)
+# Only these two are published as downloadable packages.
+# Everything else is seeded into the OS at build time.
 PACKAGES = [
-    # Shell
-    ("asdsh",   "/bin/asdsh",   "userland/sh/build/asdsh",
-     "ASD interactive shell", []),
-    # Core utilities
-    ("ls",      "/bin/ls",      "userland/bin/build/ls",
-     "List directory contents", []),
-    ("cat",     "/bin/cat",     "userland/bin/build/cat",
-     "Concatenate and print files", []),
-    ("echo",    "/bin/echo",    "userland/bin/build/echo",
-     "Print arguments to stdout", []),
-    ("pwd",     "/bin/pwd",     "userland/bin/build/pwd",
-     "Print current working directory", []),
-    ("mkdir",   "/bin/mkdir",   "userland/bin/build/mkdir",
-     "Create directories", []),
-    ("rm",      "/bin/rm",      "userland/bin/build/rm",
-     "Remove files and directories", []),
-    ("touch",   "/bin/touch",   "userland/bin/build/touch",
-     "Create or update file timestamps", []),
-    ("id",      "/bin/id",      "userland/bin/build/id",
-     "Print user and group identity", []),
-    ("whoami",  "/bin/whoami",  "userland/bin/build/whoami",
-     "Print effective username", []),
-    ("uname",   "/bin/uname",   "userland/bin/build/uname",
-     "Print system information", []),
-    ("uptime",  "/bin/uptime",  "userland/bin/build/uptime",
-     "Show system uptime", []),
-    ("kill",    "/bin/kill",    "userland/bin/build/kill",
-     "Send signals to processes", []),
-    ("wc",      "/bin/wc",      "userland/bin/build/wc",
-     "Word, line, and byte count", []),
-    ("hexdump", "/bin/hexdump", "userland/bin/build/hexdump",
-     "Hexadecimal file dump", []),
-    ("ping",    "/bin/ping",    "userland/bin/build/ping",
-     "ICMP echo test", []),
-    # Text processing
-    ("grep",    "/bin/grep",    "userland/bin/build/grep",
-     "Search for patterns in files", []),
-    ("find",    "/bin/find",    "userland/bin/build/find",
-     "Recursive file search", []),
-    ("sort",    "/bin/sort",    "userland/bin/build/sort",
-     "Sort lines of text", []),
-    ("head",    "/bin/head",    "userland/bin/build/head",
-     "Print first N lines of a file", []),
-    ("tail",    "/bin/tail",    "userland/bin/build/tail",
-     "Print last N lines of a file", []),
-    # System tools
-    ("sysinfo", "/bin/sysinfo", "userland/bin/build/sysinfo",
-     "Show system information", []),
-    ("hexdump", "/bin/hexdump", "userland/bin/build/hexdump",
-     "Hexadecimal dump utility", []),
-    ("do",      "/bin/do",      "userland/bin/build/do",
-     "Run command with elevated privileges (wheel users)", []),
-    ("apm",     "/bin/apm",     "userland/bin/build/apm",
-     "ASD Package Manager", []),
-    # Applications
     ("mifetch", "/bin/mifetch", "userland/mifetch/build/mifetch",
      "System information display (fastfetch-style)", []),
-    ("hx",      "/bin/hx",      "userland/hx/build/hx",
-     "Helix-inspired modal text editor", []),
+    ("mitext",  "/bin/mitext",  "mitext/build/mitext",
+     "Simple terminal text editor (nano-style)", []),
 ]
 
 

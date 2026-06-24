@@ -185,36 +185,7 @@ static void login_prompt(void) {
 void asdinit_main(void) {
     boot_log(" OK ", "ASD init system starting (PID 1)");
 
-    /* Autotest shortcuts — run before any interactive menu so CI works on
-     * live-media boots (2 disks) without getting stuck at boot_mode_select. */
-    if (kernel_cmdline_has("autotest_fastfetch")) {
-        g_shell_uid = UID_ROOT;
-        g_shell_gid = GID_ROOT;
-        serial_puts("\n[autotest] kernel cmdline autotest_fastfetch — skip login\n");
-        shell_autotest_exec("fastfetch");
-        serial_puts("[autotest] OK — halting (see serial.log; no EXCEPTION lines expected)\n");
-        for (;;) __asm__ volatile("cli; hlt");
-    }
-    if (kernel_cmdline_has("autotest_nettest")) {
-        g_shell_uid = UID_ROOT;
-        g_shell_gid = GID_ROOT;
-        serial_puts("\n[autotest] nettest — testing ping, DNS, TCP\n");
-        shell_autotest_exec("nettest");
-        serial_puts("[autotest] nettest done — halting\n");
-        for (;;) __asm__ volatile("cli; hlt");
-    }
-    if (kernel_cmdline_has("autotest_hxtest")) {
-        g_shell_uid = UID_ROOT;
-        g_shell_gid = GID_ROOT;
-        serial_puts("\n[autotest] kernel cmdline autotest_hxtest — skip login\n");
-        /* Run filetest first to verify basic VFS, then hxtest for hx-specific flow */
-        serial_puts("[autotest] step 1: filetest\n");
-        shell_autotest_exec("filetest");
-        serial_puts("[autotest] step 2: hxtest\n");
-        shell_autotest_exec("hxtest");
-        serial_puts("[autotest] hxtest done — halting\n");
-        for (;;) __asm__ volatile("cli; hlt");
-    }
+
 
     /* Passwd DB is loaded in kernel_main (boot_early_load_passwd_db) before sti.
      * Do not read the block device here — virtio with IRQs enabled can hang. */
