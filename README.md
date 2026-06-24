@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="documentation/logo.png" alt="OpenASD Logo" width="500" />
+  <img src="documentation/logo.png" alt="OpenASD Logo" width="200" />
   <br><br>
   <p><b>A modern, experimental x86-64 microkernel operating system</b></p>
   
