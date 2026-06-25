@@ -56,27 +56,6 @@ static void boot_puts(const char *s) {
     fb_console_puts(s);
 }
 
-static int boot_mode_select(void) {
-    for (;;) {
-        fb_console_clear();
-        boot_puts("OpenASD Live\n");
-        boot_puts("============================================================\n\n");
-        boot_puts("                 +-----------------------------------------------+\n");
-        boot_puts("                 |           OpenASD Live System                 |\n");
-        boot_puts("                 |-----------------------------------------------|\n");
-        boot_puts("                 |                                               |\n");
-        boot_puts("                 |  [I]  Install OpenASD to disk                 |\n");
-        boot_puts("                 |  [S]  Boot to live shell                      |\n");
-        boot_puts("                 |                                               |\n");
-        boot_puts("                 +-----------------------------------------------+\n\n");
-        boot_puts("Press I to install or S for live shell: ");
-        fb_console_tick();
-        char c = read_char();
-        if (c == 'i' || c == 'I') { boot_puts("I\n"); return 'I'; }
-        if (c == 's' || c == 'S') { boot_puts("S\n"); return 'S'; }
-    }
-}
-
 static void post_install_menu(void) {
     serial_puts("\n============================================================\n");
     serial_puts("  Installation complete!\n");
@@ -196,8 +175,6 @@ void asdinit_main(void) {
     } else if (block_count() > 1) {
         /* No installed system found, but multiple disks exist: likely Live media. */
         for (;;) {
-            int mode = boot_mode_select();
-            if (mode == 'S') break;
             int result = installer_run();
             if (result > 0) {
                 post_install_menu();
