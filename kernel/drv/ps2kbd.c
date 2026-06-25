@@ -75,7 +75,12 @@ void ps2kbd_init(void) {
 void ps2kbd_isr(void) {
     if (!(io_in8(KBD_STAT) & 0x01)) return;
     uint8_t sc = io_in8(KBD_DATA);
+    ps2kbd_isr_scancode(sc);
+}
 
+/* Process a single raw scancode through the state machine.
+ * Can be called from a polling path as well as from the IRQ handler. */
+void ps2kbd_isr_scancode(uint8_t sc) {
     if (sc == 0xE0) { g_ext = 1; return; }
 
     if (g_ext) {

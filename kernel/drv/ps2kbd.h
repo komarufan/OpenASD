@@ -14,6 +14,9 @@ void ps2kbd_init(void);
 /* Called from IRQ1 handler in isr_dispatch */
 void ps2kbd_isr(void);
 
+/* Process a raw scancode — reusable from polled input paths */
+void ps2kbd_isr_scancode(uint8_t sc);
+
 /* Non-blocking: returns 1 and fills *out if a key is available */
 int  ps2kbd_getc(char *out);
 

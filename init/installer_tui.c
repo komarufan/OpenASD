@@ -638,6 +638,8 @@ void tui_screen_done(int success) {
  *  -1  = user quit
  */
 int installer_run_tui(void) {
+    /* Flush any stale bytes left by UEFI/serial before reading user input. */
+    flush_input();
     /* Screen 1: Welcome */
     int choice = tui_screen_welcome();
     return choice;   /* 1=install, 0=shell, -1=quit */

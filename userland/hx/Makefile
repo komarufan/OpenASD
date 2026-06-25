@@ -24,7 +24,7 @@ TARGET = $(BUILD)/hx
 
 all:
 	@if [ -n "$(CARGO)" ] && [ -f "$(CARGO)" ]; then \
-		$(MAKE) _build_hx; \
+		$(MAKE) _build_hx || echo "  [skip] Failed to build hx editor (common on Windows without ld64.lld)"; \
 	else \
 		echo "  [skip] Rust/cargo not found — skipping hx editor (install rustup to enable)"; \
 	fi

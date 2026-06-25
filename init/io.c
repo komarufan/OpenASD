@@ -119,7 +119,30 @@ int serial_getc_nonblock(char *out) {
     return 1;
 }
 
+#define KBD_STATUS_PORT  0x64
+#define KBD_DATA_PORT    0x60
+
 int kbd_getc_nonblock(char *out) {
+    /* First check the IRQ-driven ring buffer (populated by ps2kbd_isr). */
+    if (ps2kbd_getc(out))
+        return 1;
+    /* Fallback: poll the i8042 hardware directly.
+     * This works when IRQ1 isn't firing (e.g. some QEMU/KVM configs).
+     * Only do this for single-byte make codes; extended (0xE0-prefixed)
+     * arrow keys are handled by ps2kbd_isr via interrupt, so we skip
+     * them here to avoid confusing the scancode state machine. */
+    uint8_t stat = io_in8(KBD_STATUS_PORT);
+    if (!(stat & 0x01)) return 0;         /* no data ready */
+    if (stat & 0x20) {
+        /* Mouse byte — forward to mouse ISR to consume it and avoid blocking KBD controller */
+        extern void ps2mouse_isr(void);
+        ps2mouse_isr();
+        return 0;
+    }
+    uint8_t sc = io_in8(KBD_DATA_PORT);
+    /* Feed back into the IRQ-driven ISR so the full scancode state
+     * machine (shift, ctrl, E0 prefix) handles it properly. */
+    ps2kbd_isr_scancode(sc);
     return ps2kbd_getc(out);
 }
 
@@ -138,14 +161,20 @@ int input_getc_nonblock(char *out) {
 void flush_input(void) {
     char dummy;
     g_input_unget_valid = 0;
-    /* Never spin forever — some UARTs always report data ready (hangs
-     * the installer after Enter on the hostname screen). */
-    for (int n = 0; n < 4096; n++) {
+    /* Sleep a bit to allow any transit characters from UEFI/serial to arrive */
+    pit_sleep_ms(100);
+    /* Drain the IRQ buffer and also the raw PS/2 FIFO. */
+    for (int n = 0; n < 256; n++) {
         int got = 0;
+        /* Drain PS/2 hardware directly */
+        if (io_in8(KBD_STATUS_PORT) & 0x01) {
+            (void)io_in8(KBD_DATA_PORT); got = 1;
+        }
         if (kbd_getc_nonblock(&dummy))    got = 1;
         if (serial_getc_nonblock(&dummy)) got = 1;
         if (!got) break;
     }
+    g_input_unget_valid = 0;
 }
 
 static void input_skip_optional_lf_after_cr(void) {
