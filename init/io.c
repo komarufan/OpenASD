@@ -128,21 +128,28 @@ int kbd_getc_nonblock(char *out) {
         return 1;
     /* Fallback: poll the i8042 hardware directly.
      * This works when IRQ1 isn't firing (e.g. some QEMU/KVM configs).
-     * Only do this for single-byte make codes; extended (0xE0-prefixed)
-     * arrow keys are handled by ps2kbd_isr via interrupt, so we skip
-     * them here to avoid confusing the scancode state machine. */
+     * Disable interrupts to prevent races with the IRQ handler. */
+    uint64_t rflags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(rflags) :: "memory");
+
     uint8_t stat = io_in8(KBD_STATUS_PORT);
-    if (!(stat & 0x01)) return 0;         /* no data ready */
+    if (!(stat & 0x01)) {
+        __asm__ volatile("pushq %0; popfq" :: "r"(rflags) : "memory");
+        return 0;         /* no data ready */
+    }
     if (stat & 0x20) {
         /* Mouse byte — forward to mouse ISR to consume it and avoid blocking KBD controller */
         extern void ps2mouse_isr(void);
         ps2mouse_isr();
+        __asm__ volatile("pushq %0; popfq" :: "r"(rflags) : "memory");
         return 0;
     }
     uint8_t sc = io_in8(KBD_DATA_PORT);
     /* Feed back into the IRQ-driven ISR so the full scancode state
      * machine (shift, ctrl, E0 prefix) handles it properly. */
     ps2kbd_isr_scancode(sc);
+
+    __asm__ volatile("pushq %0; popfq" :: "r"(rflags) : "memory");
     return ps2kbd_getc(out);
 }
 

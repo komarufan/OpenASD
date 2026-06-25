@@ -848,6 +848,7 @@ int installer_run(void) {
     if (welcome <= 0) return welcome;   /* 0 = live shell, -1 = quit */
 
     /* Screen 2: Disk selection */
+    flush_input();
     block_dev_t *target = NULL;
     int pick = tui_screen_disk(&target);
     if (pick <= 0 || !target) return 0;
@@ -855,9 +856,12 @@ int installer_run(void) {
     g_last_install_target = target;
 
     /* Screen 3: Hostname */
+    flush_input();
     serial_port_puts("[installer] hostname screen\n");
     tui_screen_hostname(g_hostname, sizeof(g_hostname));
 
+    /* Screen 6: Confirm */
+    flush_input();
     serial_port_puts("[installer] confirm screen\n");
     int confirmed = tui_screen_confirm(target->name, g_hostname);
     if (!confirmed) return 0;
