@@ -36,8 +36,15 @@
 #include "../mm/mm.h"
 #include "../console/fbcon.h"
 #include "../drv/ps2kbd.h"
+#include "../drv/ps2mouse.h"
+#include "../ipc/port.h"
 #include <stdint.h>
 #include <stddef.h>
+
+#define ESYS_FAULT    ((uint64_t)(int64_t)-14)   /* EFAULT */
+static int validate_user_ptr(const void *ptr, size_t size);
+static int validate_user_string(const char *ptr);
+static int copy_user_cstr(char *kbuf, size_t kcap, const char *uptr, size_t max_u);
 
 #define COM1_PORT 0x3F8
 
@@ -243,6 +250,78 @@ static int copy_to_user(void *udst, const void *ksrc, size_t n) {
     return 0;
 }
 
+static uint64_t sys_fb_info(uint64_t w_ptr, uint64_t h_ptr, uint64_t stride_ptr, uint64_t fmt_ptr) {
+    if (!validate_user_ptr((void *)(uintptr_t)w_ptr, 4) || !validate_user_ptr((void *)(uintptr_t)h_ptr, 4) ||
+        !validate_user_ptr((void *)(uintptr_t)stride_ptr, 4) || !validate_user_ptr((void *)(uintptr_t)fmt_ptr, 4)) return ESYS_FAULT;
+    fb_console_info((uint32_t *)(uintptr_t)w_ptr, (uint32_t *)(uintptr_t)h_ptr, (uint32_t *)(uintptr_t)stride_ptr, (uint32_t *)(uintptr_t)fmt_ptr);
+    return 0;
+}
+
+static uint64_t sys_fb_blit(uint64_t buf_ptr, uint64_t x, uint64_t y, uint64_t w, uint64_t h) {
+    /* Validate reading w*h*4 bytes */
+    if (!validate_user_ptr((const void *)(uintptr_t)buf_ptr, w * h * 4)) return ESYS_FAULT;
+    fb_console_blit((const uint32_t *)(uintptr_t)buf_ptr, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h);
+    return 0;
+}
+
+static uint64_t sys_get_mouse(uint64_t x_ptr, uint64_t y_ptr, uint64_t btn_ptr) {
+    if (!validate_user_ptr((void *)(uintptr_t)x_ptr, 4) || !validate_user_ptr((void *)(uintptr_t)y_ptr, 4) ||
+        !validate_user_ptr((void *)(uintptr_t)btn_ptr, 4)) return ESYS_FAULT;
+    ps2mouse_get_state((int32_t *)(uintptr_t)x_ptr, (int32_t *)(uintptr_t)y_ptr, (uint32_t *)(uintptr_t)btn_ptr);
+    return 0;
+}
+
+static uint64_t sys_port_create(uint64_t name_ptr) {
+    char name[64];
+    if (copy_user_cstr(name, sizeof(name), (const char *)(uintptr_t)name_ptr, sizeof(name)) != 0) {
+        return ESYS_FAULT;
+    }
+    pcb_t *cur = sched_current();
+    pid_t pid = cur ? cur->pid : 0;
+    port_t port = port_open(name, PORT_CREATE, pid);
+    if (port == 0) return (uint64_t)(int64_t)-1;
+    return (uint64_t)port;
+}
+
+static uint64_t sys_port_open(uint64_t name_ptr) {
+    char name[64];
+    if (copy_user_cstr(name, sizeof(name), (const char *)(uintptr_t)name_ptr, sizeof(name)) != 0) {
+        return ESYS_FAULT;
+    }
+    pcb_t *cur = sched_current();
+    pid_t pid = cur ? cur->pid : 0;
+    port_t port = port_open(name, PORT_OPEN, pid);
+    if (port == 0) return (uint64_t)(int64_t)-1;
+    return (uint64_t)port;
+}
+
+static uint64_t sys_port_close(uint64_t port_id) {
+    port_close((port_t)port_id);
+    return 0;
+}
+
+static uint64_t sys_port_send(uint64_t port_id, uint64_t msg_ptr, uint64_t len) {
+    if (!validate_user_ptr((const void *)(uintptr_t)msg_ptr, (size_t)len)) return ESYS_FAULT;
+    int rc = port_send((port_t)port_id, (const void *)(uintptr_t)msg_ptr, (size_t)len);
+    return (uint64_t)(int64_t)rc;
+}
+
+static uint64_t sys_port_recv(uint64_t port_id, uint64_t buf_ptr, uint64_t cap, uint64_t blocking) {
+    if (!validate_user_ptr((void *)(uintptr_t)buf_ptr, (size_t)cap)) return ESYS_FAULT;
+    size_t len_out = 0;
+    int rc = port_recv((port_t)port_id, (void *)(uintptr_t)buf_ptr, (size_t)cap, &len_out, (int)blocking);
+    if (rc != 0) return (uint64_t)(int64_t)rc;
+    return (uint64_t)len_out;
+}
+
+static uint64_t sys_kbd_poll(void) {
+    char c = 0;
+    if (console_getc_nb(&c)) {
+        return (uint64_t)c;
+    }
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Pointer validation                                                   */
 /* ------------------------------------------------------------------ */
@@ -314,7 +393,7 @@ static int validate_user_str_array(const char **vec, size_t max_count,
 /* Error codes                                                          */
 /* ------------------------------------------------------------------ */
 
-#define ESYS_FAULT    ((uint64_t)(int64_t)-14)   /* EFAULT */
+
 #define ESYS_INVAL    ((uint64_t)(int64_t)-22)   /* EINVAL */
 #define ESYS_PERM     ((uint64_t)(int64_t)-1)    /* EPERM  */
 #define ESYS_NOSYS    ((uint64_t)(int64_t)-38)   /* ENOSYS */
@@ -1213,6 +1292,15 @@ uint64_t syscall_dispatch(uint64_t nr,
         if (copy_to_user(ubuf, kname, copy_len) != 0) return ESYS_FAULT;
         return 0;
     }
+    case SYS_FB_INFO:      return sys_fb_info(a0, a1, a2, a3);
+    case SYS_FB_BLIT:      return sys_fb_blit(a0, a1, a2, a3, a4);
+    case SYS_GET_MOUSE:    return sys_get_mouse(a0, a1, a2);
+    case SYS_PORT_CREATE:  return sys_port_create(a0);
+    case SYS_PORT_OPEN:    return sys_port_open(a0);
+    case SYS_PORT_CLOSE:   return sys_port_close(a0);
+    case SYS_PORT_SEND:    return sys_port_send(a0, a1, a2);
+    case SYS_PORT_RECV:    return sys_port_recv(a0, a1, a2, a3);
+    case SYS_KBD_POLL:     return sys_kbd_poll();
     default:               return ESYS_NOSYS;
     }
 }

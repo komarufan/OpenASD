@@ -90,6 +90,16 @@
 #define SYS_MEMINFO      49  /* (*total_kb, *used_kb) → 0 */
 #define SYS_GETUSERNAME  50  /* (buf, size) → 0 or -errno */
 
+#define SYS_FB_INFO      51  /* (*w, *h, *stride, *format) → 0 */
+#define SYS_FB_BLIT      52  /* (*buf, x, y, w, h) → 0 */
+#define SYS_GET_MOUSE    53  /* (*x, *y, *btn) → 0 */
+#define SYS_PORT_CREATE  54  /* (name) → port_id */
+#define SYS_PORT_OPEN    55  /* (name) → port_id */
+#define SYS_PORT_CLOSE   56  /* (port_id) → 0 */
+#define SYS_PORT_SEND    57  /* (port_id, buf, len) → status */
+#define SYS_PORT_RECV    58  /* (port_id, buf, cap) → len_out */
+#define SYS_KBD_POLL     59  /* () → char */
+
 /* Signal numbers (minimal set for v1) */
 #define SIGTERM        1
 #define SIGKILL        9
@@ -336,6 +346,47 @@ static inline int asd_meminfo(uint64_t *total_kb, uint64_t *used_kb) {
 }
 static inline int asd_getusername(char *buf, size_t size) {
     return (int)__syscall(SYS_GETUSERNAME, (long)buf, (long)size, 0, 0, 0);
+}
+
+static inline int asd_fb_info(uint32_t *w, uint32_t *h, uint32_t *stride, uint32_t *format) {
+    return (int)__syscall(SYS_FB_INFO, (long)w, (long)h, (long)stride, (long)format, 0);
+}
+
+static inline int asd_fb_blit(const uint32_t *buf, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    return (int)__syscall(SYS_FB_BLIT, (long)buf, x, y, w, h);
+}
+
+static inline int asd_get_mouse(int32_t *x, int32_t *y, uint32_t *btn) {
+    return (int)__syscall(SYS_GET_MOUSE, (long)x, (long)y, (long)btn, 0, 0);
+}
+
+static inline int asd_port_create(const char *name, int unused) {
+    (void)unused;
+    return (int)__syscall(SYS_PORT_CREATE, (long)name, 0, 0, 0, 0);
+}
+
+static inline int asd_port_open(const char *name) {
+    return (int)__syscall(SYS_PORT_OPEN, (long)name, 0, 0, 0, 0);
+}
+
+static inline int asd_port_close(int port) {
+    return (int)__syscall(SYS_PORT_CLOSE, port, 0, 0, 0, 0);
+}
+
+static inline int asd_port_send(int port, const void *buf, size_t len) {
+    return (int)__syscall(SYS_PORT_SEND, port, (long)buf, (long)len, 0, 0);
+}
+
+static inline int asd_port_recv(int port, void *buf, size_t cap) {
+    return (int)__syscall(SYS_PORT_RECV, port, (long)buf, (long)cap, 1, 0);
+}
+
+static inline int asd_port_recv_nonblock(int port, void *buf, size_t cap) {
+    return (int)__syscall(SYS_PORT_RECV, port, (long)buf, (long)cap, 0, 0);
+}
+
+static inline int asd_kbd_poll(void) {
+    return (int)__syscall(SYS_KBD_POLL, 0, 0, 0, 0, 0);
 }
 
 /* Signal and IPC wrappers */

@@ -84,6 +84,7 @@ static const char *g_exc[32] = {
 /* Declared in their respective drivers */
 extern void pit_isr(void);
 extern void ps2kbd_isr(void);
+extern void ps2mouse_isr(void);
 extern void virtio_net_rx_poll(void);
 extern uint8_t net_get_irq(void);
 
@@ -121,6 +122,7 @@ void isr_dispatch(isr_frame_t *f) {
 
     if (v == VEC_PIT_TIMER) { pit_isr();    pic_eoi(0); return; }
     if (v == VEC_KBD)       { ps2kbd_isr(); pic_eoi(1); return; }
+    if (v == VEC_MOUSE)     { ps2mouse_isr(); pic_eoi(12); return; }
     if (v == VEC_SPURIOUS)  { return; }   /* no EOI for spurious IRQ7 */
 
     /* virtio-net IRQ (dynamic, determined at init time) */

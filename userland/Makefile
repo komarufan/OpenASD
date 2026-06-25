@@ -2,11 +2,14 @@
 
 all:
 	$(MAKE) -C libasd
+	$(MAKE) -C libgui
 	$(MAKE) -C bin
 	$(MAKE) -C sbin
 	$(MAKE) -C sh
 	$(MAKE) -C drvmgr
-
+	$(MAKE) -C ws
+	$(MAKE) -C dock
+	$(MAKE) -C term
 	$(MAKE) -C hx
 
 clean:

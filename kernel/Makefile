@@ -66,6 +66,7 @@ OBJS = \
     $(BUILD)/pic.o \
     $(BUILD)/pit.o \
     $(BUILD)/ps2kbd.o \
+    $(BUILD)/ps2mouse.o \
     $(BUILD)/syscall.o \
     $(BUILD)/syscall_entry.o \
     $(BUILD)/macho.o \
@@ -187,6 +188,9 @@ $(BUILD)/security.o: security/security.c  | $(BUILD)
 
 # Drivers
 $(BUILD)/ps2kbd.o: drv/ps2kbd.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/ps2mouse.o: drv/ps2mouse.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(TARGET): $(OBJS)

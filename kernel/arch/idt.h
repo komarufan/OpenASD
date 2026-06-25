@@ -10,8 +10,9 @@
 
 /* IRQ vectors (after 8259 remap to 0x20-0x2F) */
 #define VEC_PIT_TIMER  0x20   /* IRQ0 — PIT */
-#define VEC_KBD        0x21   /* IRQ1 — PS/2 keyboard */
-#define VEC_SPURIOUS   0x27   /* IRQ7 — spurious */
+#define VEC_KBD        0x21   /* IRQ1 - PS/2 keyboard */
+#define VEC_MOUSE      0x2C   /* IRQ12 - PS/2 mouse */
+#define VEC_SPURIOUS   0x27   /* IRQ7 - spurious */
 #define VEC_SLAVE_EOI  0x28   /* IRQ8 — first slave */
 
 /* Interrupt frame pushed by CPU + our ISR stubs (see isr.S) */

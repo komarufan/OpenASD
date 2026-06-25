@@ -121,6 +121,9 @@ live-image: all
 	@mcopy -i "$(LIVE_IMG)" "$(BOOT_DIR)/asdkernel.bin" ::/boot/asdkernel.bin
 	@mcopy -i "$(LIVE_IMG)" "$(BOOT_DIR)/asdboot.conf"  ::/boot/asdboot.conf
 	@mcopy -i "$(LIVE_IMG)" userland/sh/build/asdsh ::/bin/asdsh
+	@mcopy -i "$(LIVE_IMG)" userland/ws/build/ws ::/bin/ws
+	@mcopy -i "$(LIVE_IMG)" userland/dock/build/dock ::/bin/dock
+	@mcopy -i "$(LIVE_IMG)" userland/term/build/term ::/bin/term
 	@for b in $(LIVE_BINS); do \
 		mcopy -i "$(LIVE_IMG)" userland/bin/build/$$b ::/bin/$$b; \
 	done
@@ -147,6 +150,9 @@ prepare-run: all
 	@mcopy -i "$(LIVE_IMG)" "$(BOOT_DIR)/asdkernel.bin" ::/boot/asdkernel.bin
 	@mcopy -i "$(LIVE_IMG)" "$(BOOT_DIR)/asdboot.conf"  ::/boot/asdboot.conf
 	@mcopy -i "$(LIVE_IMG)" userland/sh/build/asdsh ::/bin/asdsh
+	@mcopy -i "$(LIVE_IMG)" userland/ws/build/ws ::/bin/ws
+	@mcopy -i "$(LIVE_IMG)" userland/dock/build/dock ::/bin/dock
+	@mcopy -i "$(LIVE_IMG)" userland/term/build/term ::/bin/term
 	@for b in $(LIVE_BINS); do \
 		mcopy -i "$(LIVE_IMG)" userland/bin/build/$$b ::/bin/$$b; \
 	done
@@ -261,6 +267,9 @@ install: all
 	@mcopy -o -i "$(DISK_IMG)" "$(DISK_BOOT_DIR)/asdkernel.bin" ::/boot/asdkernel.bin
 	@mcopy -o -i "$(DISK_IMG)" "$(DISK_BOOT_DIR)/asdboot.conf" ::/boot/asdboot.conf
 	@mcopy -o -i "$(DISK_IMG)" userland/sh/build/asdsh ::/bin/asdsh
+	@mcopy -o -i "$(DISK_IMG)" userland/ws/build/ws ::/bin/ws
+	@mcopy -o -i "$(DISK_IMG)" userland/dock/build/dock ::/bin/dock
+	@mcopy -o -i "$(DISK_IMG)" userland/term/build/term ::/bin/term
 	@for b in $(LIVE_BINS); do \
 		mcopy -o -i "$(DISK_IMG)" userland/bin/build/$$b ::/bin/$$b; \
 	done
@@ -365,6 +374,9 @@ usb-image: all
 	@mcopy  -o -i "$(USB_IMG)@@1M" "$(BOOT_DIR)/asdboot.conf"  ::/boot/asdboot.conf
 	@echo "==> Copying userland binaries..."
 	@mcopy  -o -i "$(USB_IMG)@@1M" userland/sh/build/asdsh     ::/bin/asdsh
+	@mcopy  -o -i "$(USB_IMG)@@1M" userland/ws/build/ws        ::/bin/ws
+	@mcopy  -o -i "$(USB_IMG)@@1M" userland/dock/build/dock    ::/bin/dock
+	@mcopy  -o -i "$(USB_IMG)@@1M" userland/term/build/term    ::/bin/term
 	@for b in $(LIVE_BINS); do \
 		mcopy -o -i "$(USB_IMG)@@1M" userland/bin/build/$$b ::/bin/$$b 2>/dev/null || true; \
 	done

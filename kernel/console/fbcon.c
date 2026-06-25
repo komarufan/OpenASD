@@ -428,6 +428,27 @@ void fb_console_puts(const char *s) {
     while (*s) fb_console_putc(*s++);
 }
 
+void fb_console_info(uint32_t *w, uint32_t *h, uint32_t *stride, uint32_t *fmt) {
+    if (w) *w = g_w;
+    if (h) *h = g_h;
+    if (stride) *stride = g_stride;
+    if (fmt) *fmt = g_fmt;
+}
+
+void fb_console_blit(const uint32_t *buf, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    if (!g_fb || x >= g_w || y >= g_h) return;
+    if (x + w > g_w) w = g_w - x;
+    if (y + h > g_h) h = g_h - y;
+
+    for (uint32_t row = 0; row < h; row++) {
+        uint32_t *dst = g_fb + (uint64_t)(y + row) * g_stride + x;
+        const uint32_t *src = buf + (uint64_t)row * w;
+        for (uint32_t col = 0; col < w; col++) {
+            dst[col] = src[col];
+        }
+    }
+}
+
 void fb_console_tick(void) {
     if (!g_ready) return;
     uint64_t now = rdtsc_now();

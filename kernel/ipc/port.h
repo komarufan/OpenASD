@@ -67,6 +67,6 @@ void    port_subsystem_init(void);
 port_t  port_open(const char *name, int flags, pid_t caller_pid);
 void    port_close(port_t id);
 int     port_send(port_t id, const void *msg, size_t len);
-int     port_recv(port_t id, void *buf, size_t cap, size_t *len_out);
+int     port_recv(port_t id, void *buf, size_t cap, size_t *len_out, int blocking);
 
 #endif /* ASD_IPC_PORT_H */

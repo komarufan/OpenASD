@@ -147,7 +147,7 @@ int port_send(port_t id, const void *msg, size_t len) {
     return -1; /* queue full */
 }
 
-int port_recv(port_t id, void *buf, size_t cap, size_t *len_out) {
+int port_recv(port_t id, void *buf, size_t cap, size_t *len_out, int blocking) {
     if (!buf || !len_out || cap < sizeof(port_slot_t)) return -1;
     port_obj_t *p = port_find_by_id(id);
     if (!p) return -1;
@@ -156,6 +156,7 @@ int port_recv(port_t id, void *buf, size_t cap, size_t *len_out) {
 
     /* Block until a message is available */
     while (ringbuf_pop(p->ring, &slot, sizeof(slot)) != 0) {
+        if (!blocking) return -2;
         /* Register as waiter and go to sleep */
         pcb_t *cur = sched_current();
         p->waiter  = cur;

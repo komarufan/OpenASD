@@ -282,15 +282,18 @@ void asdinit_main(void) {
         }
     }
 
-    login_prompt();
+    /* Spawn Window Server and Desktop Dock */
+    boot_log(" OK ", "Starting GUI Desktop Environment");
+    const char *ws_argv[] = { "/bin/ws", NULL };
+    const char *dock_argv[] = { "/bin/dock", NULL };
+    macho_spawn("/bin/ws", ws_argv, NULL);
+    /* Sleep/yield loop to give ws time to create its port */
+    for (volatile int i = 0; i < 50000000; i++) {}
+    macho_spawn("/bin/dock", dock_argv, NULL);
 
-    boot_puts("\n");
-    boot_puts("Type 'help' for commands.\n\n");
-
-    /* Built-in kernel shell — do not block in sched_reap() on /bin/asdsh.
-     * Previously PID1 waited forever: child was enqueued with rip==0 or
-     * spun in SYS_READ while the framebuffer showed only "Welcome". */
-    asd_shell_loop();
+    while (1) {
+        __asm__ volatile("sti; hlt; cli" ::: "memory");
+    }
 }
 
 // added shell exec

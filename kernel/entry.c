@@ -38,6 +38,9 @@ extern uint32_t ramfs_boot_init(const void *file_table, uint32_t count);
 extern uint32_t ramfs_root_init(const void *initrd_ptr, uint64_t initrd_sz);
 extern int ramfs_root_mkdir(const char *path);
 
+extern void ps2kbd_init(void);
+extern void ps2mouse_init(void);
+
 extern void asdinit_main(void) __attribute__((noreturn));
 
 extern void amm_early_phys_scan(const void *mmap, uint32_t count, uint32_t entry_sz);
@@ -653,6 +656,7 @@ void kernel_main_body(asd_bib_t *bib, uint64_t magic) {
     serial_puts("  [6.5/7] syscall + keyboard\n");
     syscall_init();   /* SYSCALL/SYSRET MSRs, per-CPU GS struct */
     ps2kbd_init();    /* flush PS/2, unmask IRQ1                 */
+    ps2mouse_init();
 
     /* ----------------------------------------------------------------- */
 

@@ -91,8 +91,17 @@
 #define SYS_TLS_CLOSE    48  /* (id) → 0 */
 #define SYS_MEMINFO      49  /* (*total_kb_out, *used_kb_out) → 0 */
 #define SYS_GETUSERNAME  50  /* (buf, size) → 0 or -errno */
+#define SYS_FB_INFO      51  /* (*w, *h, *stride, *format) → 0 */
+#define SYS_FB_BLIT      52  /* (*buf, x, y, w, h) → 0 */
+#define SYS_GET_MOUSE    53  /* (*x, *y, *btn) → 0 */
+#define SYS_PORT_CREATE  54  /* (name) → port_id */
+#define SYS_PORT_OPEN    55  /* (name) → port_id */
+#define SYS_PORT_CLOSE   56  /* (port_id) → 0 */
+#define SYS_PORT_SEND    57  /* (port_id, buf, len) → status */
+#define SYS_PORT_RECV    58  /* (port_id, buf, cap) → len_out */
+#define SYS_KBD_POLL     59  /* () → char (or 0) */
 
-#define SYSCALL_MAX   50
+#define SYSCALL_MAX   59
 
 /* Signal numbers (subset — enough for v1) */
 #define SIGTERM        1
