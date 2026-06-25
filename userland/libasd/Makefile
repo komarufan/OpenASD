@@ -39,7 +39,7 @@ _CARGO_SEARCH := /c/Users/Администратор/.cargo/bin/cargo \
                  $(HOME)/.cargo/bin/cargo
 _CARGO_FOUND  := $(firstword $(wildcard $(_CARGO_SEARCH)))
 
-rust:
+rust: | $(BUILD)
 	@if [ -n "$(_CARGO_FOUND)" ]; then \
 		$(MAKE) -C rust; \
 	else \

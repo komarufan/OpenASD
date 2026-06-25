@@ -172,6 +172,20 @@ char read_char(void) {
     }
 }
 
+static int input_getc_timeout(char *out, uint32_t ms) {
+    extern uint64_t pit_ticks(void);
+    uint64_t start = pit_ticks();
+    /* 1 tick = 10ms */
+    uint64_t ticks_to_wait = ms / 10;
+    if (ticks_to_wait == 0) ticks_to_wait = 1;
+
+    while (pit_ticks() - start < ticks_to_wait) {
+        if (input_getc_nonblock(out)) return 1;
+        __asm__ volatile("pause");
+    }
+    return 0;
+}
+
 int read_menu_key(void) {
     for (;;) {
         char ch = (char)input_wait_key();
@@ -179,12 +193,10 @@ int read_menu_key(void) {
         if ((uint8_t)ch == 0x81) return 2; /* down */
         if (ch == '\r' || ch == '\n') return 3; /* enter */
         if (ch == 0x1B) {
-            /* Try parsing ANSI escape sequence for arrows */
+            /* Try parsing ANSI escape sequence for arrows with a 50ms timeout */
             char next1, next2;
-            for (volatile int i = 0; i < 50000; i++) {}
-            if (input_getc_nonblock(&next1) && next1 == '[') {
-                for (volatile int i = 0; i < 50000; i++) {}
-                if (input_getc_nonblock(&next2)) {
+            if (input_getc_timeout(&next1, 50) && next1 == '[') {
+                if (input_getc_timeout(&next2, 50)) {
                     if (next2 == 'A') return 1; /* up */
                     if (next2 == 'B') return 2; /* down */
                 }
