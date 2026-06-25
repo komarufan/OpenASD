@@ -178,7 +178,21 @@ int read_menu_key(void) {
         if ((uint8_t)ch == 0x80) return 1; /* up   */
         if ((uint8_t)ch == 0x81) return 2; /* down */
         if (ch == '\r' || ch == '\n') return 3; /* enter */
-        if (ch == 'q' || ch == 'Q' || ch == 0x1B) return 4; /* quit/esc */
+        if (ch == 0x1B) {
+            /* Try parsing ANSI escape sequence for arrows */
+            char next1, next2;
+            for (volatile int i = 0; i < 50000; i++) {}
+            if (input_getc_nonblock(&next1) && next1 == '[') {
+                for (volatile int i = 0; i < 50000; i++) {}
+                if (input_getc_nonblock(&next2)) {
+                    if (next2 == 'A') return 1; /* up */
+                    if (next2 == 'B') return 2; /* down */
+                }
+            } else {
+                return 4; /* esc */
+            }
+        }
+        if (ch == 'q' || ch == 'Q') return 4; /* quit */
     }
 }
 
