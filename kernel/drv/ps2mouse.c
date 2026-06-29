@@ -69,7 +69,10 @@ void ps2mouse_init(void) {
     mouse_write(0xF6);
     mouse_write(0xF4);
 
-    pic_unmask(12);   /* IRQ12 */
+    pic_unmask(2);    /* IRQ2 — slave-PIC cascade; without this, IRQ12 (on the
+                       * slave) never reaches the CPU and the mouse appears dead
+                       * while the keyboard (IRQ1, master) works fine. */
+    pic_unmask(12);   /* IRQ12 — PS/2 mouse */
 }
 
 void ps2mouse_isr(void) {
@@ -102,13 +105,10 @@ void ps2mouse_isr(void) {
             g_mouse_btn = btn;
             g_mouse_x += dx;
             g_mouse_y -= dy; /* PS/2 Y is bottom-to-top, screen is top-to-bottom */
-
-            /* Simple clamping to arbitrary max for now. 
-               Proper clamping can be done by Window Server based on resolution. */
-            if (g_mouse_x < 0) g_mouse_x = 0;
-            if (g_mouse_y < 0) g_mouse_y = 0;
-            if (g_mouse_x > 4096) g_mouse_x = 4096;
-            if (g_mouse_y > 4096) g_mouse_y = 4096;
+            /* Free-running accumulator: do NOT clamp here.  The window server
+             * tracks the cursor from the *delta* of this value and clamps to the
+             * real screen resolution, so clamping here would lose motion at the
+             * edges and make the cursor stick. */
             break;
     }
 }

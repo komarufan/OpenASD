@@ -99,6 +99,7 @@ void irq_user_fault_exit(void) {
 static void kill_user_fault(isr_frame_t *f, const char *name) {
     kputs("\n[user] ");
     kputs(name);
+    { pcb_t *c = sched_current(); if (c) { kputs(" proc="); kputs(c->name); } }
     kputs(" rip=");
     kputx(f->rip);
     kputs(" rsp=");
@@ -120,7 +121,12 @@ static void kill_user_fault(isr_frame_t *f, const char *name) {
 void isr_dispatch(isr_frame_t *f) {
     uint64_t v = f->vector;
 
-    if (v == VEC_PIT_TIMER) { pit_isr();    pic_eoi(0); return; }
+    /* EOI BEFORE pit_isr(): sched_tick() inside pit_isr() may switch context
+     * via sched_switch_context (which jumps to the next thread and never
+     * returns here), so a trailing pic_eoi(0) would be skipped, leaving IRQ0
+     * stuck in-service and the timer permanently dead. Acking first is safe —
+     * the switch runs with interrupts disabled (see sched_switch_to). */
+    if (v == VEC_PIT_TIMER) { pic_eoi(0); pit_isr(); return; }
     if (v == VEC_KBD)       { ps2kbd_isr(); pic_eoi(1); return; }
     if (v == VEC_MOUSE)     { ps2mouse_isr(); pic_eoi(12); return; }
     if (v == VEC_SPURIOUS)  { return; }   /* no EOI for spurious IRQ7 */

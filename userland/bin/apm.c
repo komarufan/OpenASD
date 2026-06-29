@@ -136,6 +136,10 @@ static void outnum(long n) {
     asd_write(1, buf + i, (size_t)(24 - i));
 }
 
+static void out_u16(uint16_t n) {
+    outnum((long)n);
+}
+
 static void outsz(long bytes) {
     if (bytes < 1024) { outnum(bytes); out(" B"); }
     else if (bytes < 1024*1024) { outnum(bytes/1024); out(" KiB"); }
@@ -270,6 +274,7 @@ static long read_file(const char *path, char *buf, long cap) {
         long r = asd_read(fd, buf + total, (size_t)(cap - 1 - total));
         if (r <= 0) break;
         total += r;
+        asd_yield();
     }
     buf[total] = 0;
     asd_close(fd);
@@ -285,6 +290,7 @@ static int write_file(const char *path, const char *buf, long len) {
         long w = asd_write(fd, buf + done, (size_t)(len - done));
         if (w <= 0) { asd_close(fd); return -1; }
         done += w;
+        asd_yield();
     }
     asd_close(fd);
     return 0;
@@ -678,11 +684,17 @@ static int http_get(const char *url, const char *dest_path, const char *label) {
         if (url_parse(cur_url, host, sizeof(host), &port, &is_tls, path, sizeof(path)) != 0)
             return -1;
 
+        out("  url: "); outn(cur_url);
+        out("  resolving: "); outn(host);
+
         uint32_t ip = 0;
         if (asd_dns_resolve(host, &ip) != 0) {
             errn("apm: DNS resolution failed");
             return -1;
         }
+
+        out("  connecting: "); out(host); out(":"); out_u16(port);
+        outn(is_tls ? " (TLS)" : "");
 
         int tcp_conn = -1;
         if (asd_tcp_connect(ip, port, &tcp_conn) != 0) {
@@ -691,6 +703,7 @@ static int http_get(const char *url, const char *dest_path, const char *label) {
 
         int tls_conn = -1;
         if (is_tls) {
+            outn("  TLS handshake...");
             tls_conn = asd_tls_connect(tcp_conn, host);
             if (tls_conn < 0) {
                 errn("apm: TLS handshake failed");
@@ -703,6 +716,8 @@ static int http_get(const char *url, const char *dest_path, const char *label) {
         scopy(req, "GET ", sizeof(req)); scat(req, path, sizeof(req));
         scat(req, " HTTP/1.0\r\nHost: ", sizeof(req)); scat(req, host, sizeof(req));
         scat(req, "\r\nUser-Agent: apm/1.0\r\nConnection: close\r\n\r\n", sizeof(req));
+
+        out("  GET "); outn(path);
 
         int send_ok;
         if (is_tls) send_ok = (asd_tls_send(tls_conn, req, (size_t)slen(req)) >= 0);
@@ -721,12 +736,15 @@ static int http_get(const char *url, const char *dest_path, const char *label) {
         int status_code = 0;
         char location[URL_LEN]; location[0] = 0;
 
+        outn("  waiting for response headers...");
+
         while (eoh < 0) {
             long n = is_tls
                      ? asd_tls_recv(tls_conn, buf + buf_n, (size_t)(sizeof(buf) - 1 - buf_n), 1)
                      : asd_tcp_recv(tcp_conn, buf + buf_n, (size_t)(sizeof(buf) - 1 - buf_n), 1);
             if (n <= 0) break;
             buf_n += (int)n;
+            asd_yield();
             buf[buf_n] = 0;
             /* search for \r\n\r\n */
             for (int i = 0; i < buf_n - 3; i++) {
@@ -746,6 +764,8 @@ static int http_get(const char *url, const char *dest_path, const char *label) {
         /* Parse status code: "HTTP/1.x NNN" — digits at positions 9,10,11 */
         if (buf_n > 12 && spfx(buf, "HTTP/1."))
             status_code = (buf[9]-'0')*100 + (buf[10]-'0')*10 + (buf[11]-'0');
+
+        out("  HTTP status: "); outnum(status_code); out("\n");
 
         if (status_code == 0) {
             errn("apm: bad HTTP status line");
@@ -831,6 +851,7 @@ static int http_get(const char *url, const char *dest_path, const char *label) {
             int nb = buf_n - body_start;
             asd_write(fd, buf + body_start, (size_t)nb);
             body_bytes += nb;
+            asd_yield();
         }
 
         /* Drain remaining body data */
@@ -842,6 +863,7 @@ static int http_get(const char *url, const char *dest_path, const char *label) {
             asd_write(fd, buf, (size_t)n);
             body_bytes += n;
             draw_progress(label, body_bytes, -1);
+            asd_yield();
         }
 
         asd_close(fd);
@@ -935,6 +957,7 @@ static int apkg_extract(const char *path, PkgInfo *p) {
                                    (size_t)(dlen - written));
                 if (w <= 0) break;
                 written += w;
+                asd_yield();
             }
             asd_close(fd);
             scopy(p->files[p->nfiles++], fpath, PATH_LEN);
@@ -1069,6 +1092,7 @@ static int cmd_install(int argc, const char **argv) {
     int rc = 0;
     for (int i = 2; i < argc; i++) {
         if (install_package(argv[i], 0) != 0) rc = 1;
+        asd_yield();
     }
     return rc;
 }

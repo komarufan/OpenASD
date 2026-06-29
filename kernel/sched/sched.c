@@ -375,7 +375,13 @@ __attribute__((visibility("default"))) void sched_bootstrap_init_thread(void) {
 }
 
 __attribute__((visibility("default"))) void sched_bootstrap_enter(void (*fn)(void)) {
-    uint64_t sp = g_bootstrap_pcb.kstack_top - 8; /* RSP%16==8 before CALL */
+    /* SysV ABI: RSP must be 16-byte aligned *before* the CALL, so that on
+     * function entry (RSP+8) is a multiple of 16.  The CALL below pushes the
+     * 8-byte return address, giving the callee the alignment its prologue
+     * assumes.  The old "kstack_top - 8" made RSP%16==8 before the CALL, so
+     * the callee saw RSP%16==0, its RBP became %16==8, and any 16-byte-aligned
+     * SSE store (movaps) the compiler emits for a stack local raised #GP. */
+    uint64_t sp = g_bootstrap_pcb.kstack_top & ~(uint64_t)0xF;  /* 16-aligned */
     __asm__ volatile(
         "mov %[sp], %%rsp\n"
         "call *%[fn]\n"
@@ -389,6 +395,31 @@ __attribute__((visibility("default"))) void sched_bootstrap_enter(void (*fn)(voi
 void sched_cpu_init(uint32_t cpu_id) {
     /* APs call this to finish per-CPU init */
     g_current[cpu_id] = &g_idle_pcb[cpu_id];
+}
+
+/* Insert pcb into g_runq[pcb->cpu] without locking.
+ * Caller MUST already hold that run queue's lock.  Split out of
+ * sched_enqueue() because sched_yield()/sched_tick() call this while
+ * already holding rq->lock — calling the locking sched_enqueue() there
+ * would re-acquire the same non-recursive spinlock and deadlock forever. */
+static void sched_enqueue_locked(pcb_t *pcb) {
+    pcb->state = PROC_READY;
+
+    runq_t *rq = &g_runq[pcb->cpu];
+    switch (pcb->sched_class) {
+    case SCHED_RT:
+        rb_insert(&rq->rt_tree, &pcb->rq_node, pcb->priority);
+        rq->rt_count++;
+        break;
+    case SCHED_INTR:
+        rb_insert(&rq->intr_tree, &pcb->rq_node, pcb->priority);
+        rq->intr_count++;
+        break;
+    default: /* SCHED_BATCH */
+        rb_insert(&rq->batch_tree, &pcb->rq_node, pcb->priority);
+        rq->batch_count++;
+        break;
+    }
 }
 
 void sched_enqueue(pcb_t *pcb) {
@@ -405,25 +436,11 @@ void sched_enqueue(pcb_t *pcb) {
             if (load < min_load) { min_load = load; cpu = i; }
         }
     }
-    pcb->cpu   = (uint8_t)cpu;
-    pcb->state = PROC_READY;
+    pcb->cpu = (uint8_t)cpu;
 
     runq_t *rq = &g_runq[cpu];
     spin_lock(&rq->lock);
-    switch (pcb->sched_class) {
-    case SCHED_RT:
-        rb_insert(&rq->rt_tree, &pcb->rq_node, pcb->priority);
-        rq->rt_count++;
-        break;
-    case SCHED_INTR:
-        rb_insert(&rq->intr_tree, &pcb->rq_node, pcb->priority);
-        rq->intr_count++;
-        break;
-    default: /* SCHED_BATCH */
-        rb_insert(&rq->batch_tree, &pcb->rq_node, pcb->priority);
-        rq->batch_count++;
-        break;
-    }
+    sched_enqueue_locked(pcb);
     spin_unlock(&rq->lock);
 }
 
@@ -475,6 +492,11 @@ pcb_t *sched_dequeue(runq_t *rq) {
 
 extern void sched_context_save(cpu_context_t *ctx);
 extern void sched_context_restore(cpu_context_t *ctx) __attribute__((noreturn));
+/* Atomic save-prev/restore-next switch.  Saves the current context with
+ * rip = its own return address, so a thread resumed through here returns
+ * normally to sched_switch_to's caller instead of re-running a stale
+ * restore (which would ping-pong two cooperative threads forever). */
+extern void sched_switch_context(cpu_context_t *prev, cpu_context_t *next);
 
 static void sched_switch_to(pcb_t *next);
 
@@ -487,6 +509,15 @@ static void sched_switch_to(pcb_t *next) {
         return;
     if (cur == next)
         return;
+
+    /* Disable interrupts for the whole switch.  The cooperative path
+     * (sched_yield from PID1) runs with IF=1, and this routine updates
+     * g_current[cpu]=next BEFORE the actual register switch below; a PIT IRQ
+     * landing in that window would see cur=next, decide to preempt, and
+     * re-enter sched_switch_to on a half-done switch → corruption / freeze.
+     * sched_switch_context saves rflags with IF forced on, so the thread we
+     * switch to (and cur, when later resumed) still run interruptible. */
+    __asm__ volatile("cli");
 
     /* Program preemption timer */
     uint64_t quantum = 0;
@@ -508,10 +539,19 @@ static void sched_switch_to(pcb_t *next) {
 
     sched_state_update();
     syscall_on_thread_switch(next);
-    sched_load_cr3(next->regs.cr3);
 
-    sched_context_save(&cur->regs);
-    sched_context_restore(&next->regs);
+    /* Do NOT switch CR3 here.  sched_switch_context() saves cur's context by
+     * reading the live %cr3; if we loaded next's CR3 first, cur->regs.cr3 would
+     * be clobbered with next's address space.  cur would then be resumed later
+     * with the wrong CR3 (e.g. a user thread restored under the kernel page
+     * tables → its user code/stack unmapped → #GP on the sysret back to ring 3).
+     * sched_context_restore (the tail of sched_switch_context) loads next's CR3
+     * from next->regs.cr3 for us. */
+
+    /* Single atomic switch: save cur (resuming == returning from this call)
+     * and restore next.  Must NOT be two separate save/restore calls — that
+     * would resume cur mid-function and re-restore a stale 'next'. */
+    sched_switch_context(&cur->regs, &next->regs);
 }
 
 void sched_tick(uint64_t now_ns) {
@@ -544,7 +584,7 @@ void sched_tick(uint64_t now_ns) {
         /* Re-enqueue and switch */
         if (cur->state == PROC_RUN) {
             spin_lock(&rq->lock);
-            sched_enqueue(cur);
+            sched_enqueue_locked(cur);   /* lock already held */
             pcb_t *next = sched_dequeue(rq);
             spin_unlock(&rq->lock);
             sched_switch_to(next);
@@ -561,8 +601,13 @@ void sched_yield(void) {
     pcb_t   *cur = g_current[cpu];
 
     spin_lock(&rq->lock);
-    if (cur != rq->idle_pcb && cur != g_reap_waiter)
-        sched_enqueue(cur);
+    /* Only re-enqueue a thread that is actually RUNNABLE.  A thread that just
+     * set itself PROC_WAIT (blocking in port_recv/net_recv) and then yielded
+     * must NOT be put back on the run queue, or it busy-polls forever instead
+     * of sleeping — which starves the GUI of CPU and makes rendering crawl.
+     * sched_wake() re-enqueues it when its event arrives. */
+    if (cur != rq->idle_pcb && cur != g_reap_waiter && cur->state == PROC_RUN)
+        sched_enqueue_locked(cur);   /* lock already held */
     pcb_t *next = sched_dequeue(rq);
     spin_unlock(&rq->lock);
     sched_switch_to(next);
@@ -763,11 +808,12 @@ int sched_reap(pid_t pid, exit_info_t *info) {
             spin_lock(&rq->lock);
             sched_takeoff_runq_locked(rq, pcb);
             spin_unlock(&rq->lock);
-            /* Boost priority only after removal from the original sched_class tree,
-             * otherwise sched_takeoff_runq_locked searches the wrong tree and leaves
-             * the node embedded in batch_tree, corrupting it on the next spawn. */
-            pcb->sched_class = SCHED_RT;
-            pcb->priority    = 0;
+            /* Do NOT boost the foreground child to SCHED_RT.  As the sole RT
+             * task it would re-select itself on every sched_yield() (BATCH GUI
+             * tasks never run), so a child that yields while waiting on I/O
+             * (e.g. `apm` reading an HTTP response, which calls asd_yield()) hangs
+             * the whole machine.  Keeping its original BATCH class lets it
+             * round-robin cooperatively with ws/dock and make progress. */
             g_current[cpu] = pcb;
             rq->current    = pcb;
             pcb->state     = PROC_RUN;

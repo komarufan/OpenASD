@@ -49,6 +49,14 @@ impl Editor {
         }
     }
 
+    /// Runtime initialisation of fields that must be zero in the const
+    /// initializer (so the static stays in __bss — see buf.rs).
+    pub fn boot_init(&mut self) {
+        self.screen.rows = 25;
+        self.screen.cols = 80;
+        if self.buf.count == 0 { self.buf.count = 1; }
+    }
+
     pub fn open(&mut self, path: &[u8]) {
         let len = path.len().min(255);
         self.filename[..len].copy_from_slice(&path[..len]);
@@ -332,23 +340,36 @@ impl Editor {
 
     pub fn run(&mut self) {
         clear_screen();
+        let mut dirty = true;
         loop {
-            self.clamp_cursor();
-            self.scroll();
-            self.redraw();
+            // Only repaint when state changed — repainting every iteration
+            // floods the term pipe with a full-screen ANSI redraw on every spin.
+            if dirty {
+                self.clamp_cursor();
+                self.scroll();
+                self.redraw();
+                dirty = false;
+            }
 
             if self.quit { break; }
 
             // Read one byte from stdin
             let mut ch = [0u8; 1];
             let n = syscall::read(STDIN, &mut ch);
-            if n <= 0 { continue; }
+            if n <= 0 {
+                // Empty (non-blocking) stdin: yield so the desktop keeps
+                // running instead of hard-freezing the VM (foreground children
+                // are not preempted, so a busy-spin starves ws/dock/term).
+                syscall::yield_now();
+                continue;
+            }
 
             match self.mode {
                 Mode::Normal  => self.handle_normal(ch[0]),
                 Mode::Insert  => self.handle_insert(ch[0]),
                 Mode::Command => self.handle_command(ch[0]),
             }
+            dirty = true;
         }
         clear_screen();
     }

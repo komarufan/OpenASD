@@ -32,6 +32,10 @@ extern void  *memset(void *, int, size_t);
 
 static char g_cwd[PATH_MAX_SH] = "/";
 
+static void write_str(const char *s) {
+    asd_write(1, s, strlen(s));
+}
+
 /* ------------------------------------------------------------------ */
 /* Path resolution                                                      */
 /* ------------------------------------------------------------------ */
@@ -214,6 +218,10 @@ static void exec_line(char *line) {
     }
     cmd_part[k] = '\0';
 
+    char spawn_part[LINE_MAX];
+    strncpy(spawn_part, cmd_part, sizeof(spawn_part));
+    spawn_part[sizeof(spawn_part) - 1] = '\0';
+
     /* Try built-in commands first (they handle their own I/O) */
     char *cmd_name = cmd_part;
     while (*cmd_name == ' ') cmd_name++;
@@ -224,7 +232,7 @@ static void exec_line(char *line) {
 
     if (!try_builtin(cmd_name, arg)) {
         /* Fallback: spawn from /bin/<cmd> with possible redirects */
-        int pid = spawn_cmd_str(cmd_part, in_fd, out_fd);
+        int pid = spawn_cmd_str(spawn_part, in_fd, out_fd);
         if (pid < 0) printf("asdsh: %s: command not found\n", cmd_name);
         else asd_wait(pid, NULL);
     }
@@ -278,6 +286,11 @@ static void cmd_cd(const char *arg) {
 static void cmd_pwd(const char *arg) {
     (void)arg;
     printf("%s\n", g_cwd);
+}
+
+static void cmd_clear(const char *arg) {
+    (void)arg;
+    write_str("\033[2J\033[H");
 }
 
 static void cmd_cat(const char *arg)     { run_external("cat",     arg); }
@@ -341,6 +354,7 @@ static shell_cmd_t g_cmds[] = {
     {"rm",        NULL,    cmd_rm,        "rm <file>      - Remove file"},
     {"touch",     NULL,    cmd_touch,     "touch <file>   - Create empty file"},
     {"stat",      NULL,    cmd_stat,      "stat <path>    - Display file status"},
+    {"clear",     "cls",   cmd_clear,     "clear          - Clear the terminal screen"},
     {"echo",      NULL,    cmd_echo,      "echo [text]    - Display a line of text"},
     {"uname",     NULL,    cmd_uname,     "uname          - Print system name"},
     {"uptime",    NULL,    cmd_uptime,    "uptime         - Show system uptime"},
@@ -382,15 +396,39 @@ static int try_builtin(const char *cmd_name, const char *arg) {
 /* ------------------------------------------------------------------ */
 
 static void print_prompt(void) {
-    int pid = asd_getpid();
-    printf("[%d] %s $ ", pid, g_cwd);
+    char user[64];
+    asd_utsname_t uts;
+
+    if (asd_getusername(user, sizeof(user)) != 0 || !user[0]) {
+        if (asd_geteuid() == 0) strncpy(user, "root", sizeof(user));
+        else strncpy(user, "user", sizeof(user));
+        user[sizeof(user) - 1] = '\0';
+    }
+
+    memset(&uts, 0, sizeof(uts));
+    if (asd_uname(&uts) != 0 || !uts.nodename[0]) {
+        strncpy(uts.nodename, "asd", sizeof(uts.nodename));
+        uts.nodename[sizeof(uts.nodename) - 1] = '\0';
+    }
+
+    printf("%s@%s:%s$ ", user, uts.nodename, g_cwd);
 }
 
 int main(int argc, char **argv, char **envp) {
-    (void)argc; (void)argv; (void)envp;
+    (void)envp;
 
-    puts("\nasdsh -- ASD userspace shell");
-    puts("Type 'help' for commands, 'fastfetch' for system info.\n");
+    /* `-q` (quiet) suppresses the startup banner — term prints its own
+     * "Welcome to term" greeting instead, while the serial console keeps it. */
+    int quiet = 0;
+    for (int i = 1; i < argc; i++) {
+        if (argv[i] && argv[i][0] == '-' && argv[i][1] == 'q' && argv[i][2] == '\0')
+            quiet = 1;
+    }
+
+    if (!quiet) {
+        puts("\nasdsh -- ASD userspace shell");
+        puts("Type 'help' for commands, 'fastfetch' for system info.\n");
+    }
 
     char line[LINE_MAX];
 

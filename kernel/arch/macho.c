@@ -218,15 +218,22 @@ uint64_t macho_load(const void *image, size_t image_size, vmap_t *vm) {
             if (seg_sz == 0 || seg_sz > (64UL * 1024 * 1024)) return 0;
 
             if (amm_region_add(vm, (vaddr_t)seg_start, seg_sz, prot, RGN_FILE, -1) != 0) return 0;
-            if (!amm_region_populate(vm, (vaddr_t)seg_start, seg_sz, prot | PROT_WRITE)) return 0;
 
-            if (seg->filesize > 0)
+            /* Populate + copy ONLY the file-backed pages.  The zero-fill tail
+             * (vmsize > filesize) is left to demand-page via the #PF handler
+             * (amm_page_fault zero-fills on touch).  Eagerly populating the
+             * whole segment fails for multi-MB zero-fill regions — e.g. hx's
+             * 2.6 MB static editor buffer — under memory pressure, which showed
+             * up as "macho_spawn: invalid Mach-O". */
+            if (seg->filesize > 0) {
+                uint64_t file_end     = PG_UP(seg->vmaddr + seg->filesize);
+                size_t   file_pages   = (size_t)(file_end - seg_start);
+                if (!amm_region_populate(vm, (vaddr_t)seg_start, file_pages, prot | PROT_WRITE)) return 0;
                 if (vm_copy_m(vm, (vaddr_t)seg->vmaddr,
                               (const uint8_t *)image + seg->fileoff,
                               (size_t)seg->filesize) != 0) return 0;
-            if (seg->vmsize > seg->filesize)
-                if (vm_zero_m(vm, (vaddr_t)(seg->vmaddr + seg->filesize),
-                              (size_t)(seg->vmsize - seg->filesize)) != 0) return 0;
+            }
+            /* BSS / zero-fill tail demand-pages lazily — nothing to do here. */
 
             if (!got_text && (seg->initprot & VM_PROT_EXECUTE)) {
                 text_vmaddr = seg->vmaddr;
@@ -259,6 +266,7 @@ uint64_t macho_load(const void *image, size_t image_size, vmap_t *vm) {
 /* ------------------------------------------------------------------ */
 
 uint32_t macho_spawn(const char *vfs_path, const char **argv, const char **envp) {
+    extern void serial_puts(const char *);
     fd_t fd = vfs_open(vfs_path, VFS_O_READ, (void *)0);
     if ((int)fd < 0) return 0;
 
@@ -278,7 +286,6 @@ uint32_t macho_spawn(const char *vfs_path, const char **argv, const char **envp)
 
     uint64_t entry = macho_load(g_macho_buf, total, vm);
     if (!entry) {
-        extern void serial_puts(const char *);
         serial_puts("macho_spawn: invalid Mach-O ");
         serial_puts(vfs_path);
         serial_puts("\n");
@@ -289,8 +296,17 @@ uint32_t macho_spawn(const char *vfs_path, const char **argv, const char **envp)
     vaddr_t stack_base = (vaddr_t)(USER_STACK_TOP_M - USER_STACK_SIZE_M);
     amm_region_add(vm, stack_base, USER_STACK_SIZE_M,
                    PROT_READ | PROT_WRITE, RGN_STACK, -1);
-    amm_region_populate(vm, stack_base, USER_STACK_SIZE_M,
-                        PROT_READ | PROT_WRITE);
+    /* Populate ONLY the top 64 KiB of the stack — enough for build_stack_macho
+     * (argv/envp/auxv) and the initial frames.  The rest grows on demand via the
+     * #PF handler (RGN_STACK is demand-pageable).  Eagerly populating the full
+     * 2 MiB per process otherwise fails once several processes are already up
+     * (ws + syslog + netd), so e.g. dock would fail to get a stack and never
+     * start — the cause of "installed desktop draws one frame then no dock". */
+    #define STACK_PREPOP_M  (64 * 1024)
+    if (!amm_region_populate(vm, USER_STACK_TOP_M - STACK_PREPOP_M,
+                             STACK_PREPOP_M, PROT_READ | PROT_WRITE)) {
+        amm_vmap_destroy(vm); return 0;
+    }
 
     uint64_t initial_rsp = build_stack_macho(argv, envp, vm);
     if (!initial_rsp) { amm_vmap_destroy(vm); return 0; }

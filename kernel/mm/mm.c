@@ -325,6 +325,10 @@ static uint64_t g_kernel_cr3;
 
 uint64_t amm_get_kernel_cr3(void) { return g_kernel_cr3; }
 
+/* Diagnostics: current free / total physical page counts. */
+uint64_t amm_free_pages(void)  { return g_phys.free_pages; }
+uint64_t amm_total_pages(void) { return g_phys.total_pages; }
+
 void amm_kernel_pml4_init(void) {
     paddr_t p = amm_phys_alloc(0);
     if (!p) mm_halt();

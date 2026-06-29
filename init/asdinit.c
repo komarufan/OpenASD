@@ -162,6 +162,10 @@ static void login_prompt(void) {
 /* ------------------------------------------------------------------ */
 
 void asdinit_main(void) {
+    extern void pic_unmask(int irq);
+    pic_unmask(0);    /* PIT / sched_tick */
+    __asm__ volatile("sti");
+
     boot_log(" OK ", "ASD init system starting (PID 1)");
 
 
@@ -282,18 +286,57 @@ void asdinit_main(void) {
         }
     }
 
-    /* Spawn Window Server and Desktop Dock */
+    /* Authenticate the user BEFORE drawing any GUI.  The login prompt runs on
+     * the framebuffer console + PS/2 keyboard (readline_serial echoes to both
+     * serial and fb, and reads keyboard-first), so it works on a real monitor.
+     * Only after a successful login do we bring up the desktop. */
+    fb_console_clear();
+    login_prompt();
+
+    /* Spawn Window Server and Desktop Dock (post-login).
+     * Use boot_puts (serial + framebuffer) for these markers so progress is
+     * visible ON SCREEN — boot_log() only writes to the serial port, which is
+     * why an early GUI hang looks like "stuck at 'Welcome to ASD'". */
     boot_log(" OK ", "Starting GUI Desktop Environment");
+    boot_puts("Loading window server (/bin/ws)...\n");
     const char *ws_argv[] = { "/bin/ws", NULL };
     const char *dock_argv[] = { "/bin/dock", NULL };
-    macho_spawn("/bin/ws", ws_argv, NULL);
-    /* Sleep/yield loop to give ws time to create its port */
-    for (volatile int i = 0; i < 50000000; i++) {}
-    macho_spawn("/bin/dock", dock_argv, NULL);
+    uint32_t ws_pid = macho_spawn("/bin/ws", ws_argv, NULL);
+    boot_puts(ws_pid ? "Window server spawned, starting desktop...\n"
+                     : "ERROR: /bin/ws could not be loaded\n");
+    if (ws_pid) {
+        /* PID1 is never preempted by the PIT (see sched_tick), so a busy-wait
+         * here would never let ws run.  Cooperatively yield instead, giving
+         * the window server CPU time to create its port before dock connects. */
+        for (int i = 0; i < 200; i++)
+            sched_yield();
+        uint32_t dock_pid = macho_spawn("/bin/dock", dock_argv, NULL);
+        if (!dock_pid) boot_puts("WARN: /bin/dock could not be loaded\n");
 
-    while (1) {
-        __asm__ volatile("sti; hlt; cli" ::: "memory");
+        /* Keep PID1 yielding so the GUI processes get scheduled (a plain `hlt`
+         * would freeze the desktop — PID1 is never preempted by the timer).
+         * BUT if the window server ever dies (failed to map the framebuffer,
+         * out of memory, crashed), don't sit forever on a blank screen with a
+         * stale console cursor — fall through to the kernel shell so the box
+         * stays usable and any error ws printed is visible. */
+        for (;;) {
+            pcb_t *wsp = sched_find((pid_t)ws_pid);
+            if (!wsp || wsp->state == PROC_DEAD) {
+                boot_log("WARN", "Window server exited — starting shell");
+                break;
+            }
+            sched_yield();
+        }
+    } else {
+        /* No window server on disk (e.g. system installed before the desktop
+         * was added). */
+        boot_log("WARN", "Window server not found — starting shell");
     }
+
+    /* Interactive kernel shell fallback. */
+    boot_puts("\n");
+    boot_puts("Type 'help' for commands.\n\n");
+    asd_shell_loop();
 }
 
 // added shell exec

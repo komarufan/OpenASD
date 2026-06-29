@@ -814,7 +814,7 @@ static void deploy_directory_structure(const char *user_name) {
     static const char *bins[] = {
         "asdsh", "ls", "cat", "mkdir", "rm", "touch", "echo", "pwd",
         "sysinfo", "uname", "uptime", "id", "whoami", "kill",
-        "hexdump", "wc", "hx", "mifetch", "ping", NULL
+        "hexdump", "wc", "hx", "mifetch", "ping", "ws", "dock", "term", NULL
     };
     for (int i = 0; bins[i]; i++) {
         static char src[64], dst[64];

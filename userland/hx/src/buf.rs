@@ -12,10 +12,15 @@ pub struct Buffer {
 
 impl Buffer {
     pub const fn new() -> Self {
+        // NOTE: every field MUST be zero here so the ~2 MB static Editor lands
+        // in __bss (zero-fill) instead of __DATA (stored in the file).  A single
+        // non-zero field (e.g. count: 1) forces the whole 2 MB into the binary,
+        // overflowing the loader/ramfs size limit -> "invalid Mach-O".  count is
+        // bumped to 1 at runtime by Editor::boot_init().
         Buffer {
             lines: [[0u8; MAX_COLS]; MAX_LINES],
             lens:  [0usize; MAX_LINES],
-            count: 1,
+            count: 0,
             dirty: false,
         }
     }

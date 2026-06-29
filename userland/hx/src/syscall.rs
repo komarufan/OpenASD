@@ -12,6 +12,7 @@ pub const SYS_CLOSE:  i64 = 3;
 pub const SYS_READ:   i64 = 4;
 pub const SYS_WRITE:  i64 = 5;
 pub const SYS_SEEK:   i64 = 7;
+pub const SYS_YIELD:  i64 = 14;
 
 // Open flags — must match kernel/arch/syscall.h and libasd/include/asd/syscall.h
 pub const O_RDONLY: i64 = 0x01;
@@ -43,4 +44,12 @@ pub fn close(fd: i32) {
 
 pub fn seek(fd: i32, offset: i64, whence: i32) -> i64 {
     unsafe { raw_syscall(SYS_SEEK, fd as i64, offset, whence as i64, 0, 0) }
+}
+
+/// Cooperatively yield the CPU.  Essential in the input loop: a foreground
+/// child is not preempted (sched_tick early-returns on g_reap_waiter), so
+/// busy-spinning on an empty stdin pipe would starve ws/dock/term and freeze
+/// the whole desktop.
+pub fn yield_now() {
+    unsafe { raw_syscall(SYS_YIELD, 0, 0, 0, 0, 0); }
 }

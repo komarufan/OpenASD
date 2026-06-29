@@ -53,7 +53,9 @@ static inline int
 ringbuf_init(void *mem, uint32_t slot_size, uint32_t slot_count)
 {
     if (!mem) return -1;
-    if (!is_pow2(slot_size) || slot_size < 8)  return -1;
+    /* slot_size must be a power of two >= 1.  (Byte-stream pipes use 1-byte
+     * slots; data is moved with byte memcpy so no alignment is required.) */
+    if (!is_pow2(slot_size) || slot_size < 1)  return -1;
     if (!is_pow2(slot_count) || slot_count < 2) return -1;
 
     ringbuf_t *rb = (ringbuf_t *)mem;

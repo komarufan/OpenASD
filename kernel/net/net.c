@@ -15,6 +15,35 @@
 #include <stddef.h>
 #include <string.h>
 
+extern void sched_yield(void);
+
+static void net_wait_for_io(void) {
+    /* Wait ~one PIT tick (10 ms) of REAL time so QEMU/SLIRP can deliver packets,
+     * but cooperatively — repeatedly sched_yield() instead of `hlt`.
+     *
+     * The old code did `sti; hlt; cli`, which HALTS THE WHOLE CPU.  When a
+     * network call runs inside a user process's syscall (e.g. `apm update` from
+     * the terminal), that froze the GUI and, worse, could wedge if no IRQ woke
+     * the hlt — making `apm` appear to hang at "resolving ...".  Yielding lets
+     * the window server / other processes run; when nothing else is runnable
+     * the idle task halts on its own, still giving QEMU host time.  pit_ticks()
+     * advances from the timer IRQ regardless of which task is running. */
+    /* Wait for the next interrupt (the PIT @ 100 Hz wakes us within ~10 ms, or
+     * the NIC IRQ fires sooner on an incoming packet).
+     *
+     * Do NOT sched_yield() here.  A network call made from a foreground-reaped
+     * child (e.g. `apm`/`nettest` launched by the shell) runs at SCHED_RT and is
+     * OFF the run queue; sched_yield would re-enqueue it, immediately re-pick
+     * itself (highest priority), and double-insert its rb-node — corrupting the
+     * run queue and wedging the whole scheduler.  Just hlt: the timer keeps the
+     * wait bounded and the cooperative model is preserved by staying on-CPU.
+     * pic_unmask(0) guarantees the PIT can wake us even during early boot, when
+     * the global IRQ0 unmask in asdinit has not run yet. */
+    extern void pic_unmask(int);
+    pic_unmask(0);
+    __asm__ volatile("sti; hlt; cli" ::: "memory");
+}
+
 /* Minimal serial debug — uses I/O port helpers defined later in this file */
 static inline uint8_t net_in8(uint16_t port) {
     uint8_t v; __asm__ volatile("inb %1,%0" : "=a"(v) : "Nd"(port)); return v;
@@ -313,7 +342,7 @@ static int icmp_send_echo(uint32_t dst_ip, uint16_t id, uint16_t seq) {
         arp_send_request(nexthop);
         /* Yield CPU to QEMU so it can process our ARP request and reply */
         for (int retry = 0; retry < 50; retry++) {
-            __asm__ volatile("sti; hlt; cli" ::: "memory");
+            net_wait_for_io();
             virtio_net_rx_poll();
             if (arp_lookup(nexthop, dst_mac) == 0) break;
         }
@@ -372,7 +401,7 @@ int net_icmp_ping(uint32_t dst_ip, uint32_t *rtt_ms) {
             arp_send_request(nexthop);
         /* Poll RX: give QEMU time to process ARP and send reply */
         for (int h = 0; h < 10; h++) {
-            __asm__ volatile("sti; hlt; cli" ::: "memory");
+            net_wait_for_io();
             virtio_net_rx_poll();
             if (arp_lookup(nexthop, probe_mac) == 0) goto arp_ok;
         }
@@ -388,7 +417,7 @@ arp_ok:
      * 100 iterations = ~1 second timeout per ping.
      */
     for (uint32_t i = 0; i < 100; i++) {
-        __asm__ volatile("sti; hlt; cli" ::: "memory");
+        net_wait_for_io();
         virtio_net_rx_poll();
         if (g_ping_reply_ready &&
             g_ping_reply_id == id && g_ping_reply_seq == seq) {
@@ -481,7 +510,7 @@ int net_udp_send(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
         for (int a = 0; a < 30; a++) {
             arp_send_request(nexthop);
             for (int p = 0; p < 10; p++) {
-                __asm__ volatile("sti; hlt; cli" ::: "memory");
+                net_wait_for_io();
                 virtio_net_rx_poll();
                 if (arp_lookup(nexthop, dst_mac) == 0) goto udp_arp_ok;
             }
@@ -729,6 +758,10 @@ static void tcp_rx_conn(tcp_conn_t *c, uint8_t flags,
             }
             c->rcv_nxt += plen;
             tcp_tx(c, TCP_FL_ACK, NULL, 0);
+        } else if (plen > 0) {
+            /* Out-of-order / duplicate data segment: re-ACK what we have so the
+             * peer can fast-retransmit the missing segment. */
+            tcp_tx(c, TCP_FL_ACK, NULL, 0);
         }
         /* Remote FIN */
         if ((flags & TCP_FL_FIN) && c->state == TCP_ST_ESTABLISHED) {
@@ -811,7 +844,7 @@ int net_tcp_connect(uint32_t dst_ip, uint16_t dst_port, int *conn_out) {
 
     /* Wait for SYN-ACK (up to ~10s) */
     for (int t = 0; t < 1000; t++) {
-        __asm__ volatile("sti; hlt; cli" ::: "memory");
+        net_wait_for_io();
         virtio_net_rx_poll();
         if (c->state == TCP_ST_ESTABLISHED) { *conn_out = slot; return 0; }
         if (c->state == TCP_ST_CLOSED) return -1;
@@ -833,7 +866,7 @@ int net_tcp_send(int id, const void *data, uint32_t len) {
         c->snd_nxt += chunk;
         /* Wait for ACK (~2s timeout) */
         for (int t = 0; t < 200; t++) {
-            __asm__ volatile("sti; hlt; cli" ::: "memory");
+            net_wait_for_io();
             virtio_net_rx_poll();
             if (c->snd_una >= c->snd_nxt) break;
             if (c->state != TCP_ST_ESTABLISHED) return -1;
@@ -853,7 +886,7 @@ int net_tcp_recv(int id, void *buf, uint32_t cap, int blocking) {
         for (int t = 0; t < 3000; t++) {
             if (c->rx_rd != c->rx_wr) break;
             if (c->state == TCP_ST_CLOSE_WAIT || c->state == TCP_ST_CLOSED) break;
-            __asm__ volatile("sti; hlt; cli" ::: "memory");
+            net_wait_for_io();
             virtio_net_rx_poll();
         }
     }
@@ -876,7 +909,7 @@ void net_tcp_close(int id) {
         tcp_tx(c, TCP_FL_FIN | TCP_FL_ACK, NULL, 0);
         c->snd_nxt++;
         for (int t = 0; t < 100; t++) {
-            __asm__ volatile("sti; hlt; cli" ::: "memory");
+            net_wait_for_io();
             virtio_net_rx_poll();
             if (c->state == TCP_ST_CLOSED) break;
         }
@@ -960,7 +993,7 @@ int net_dns_resolve(const char *hostname, uint32_t *ip_out) {
     /* Wait for response (up to ~3s, checking UDP ring) */
     static uint8_t rbuf[512];
     for (int t = 0; t < 300; t++) {
-        __asm__ volatile("sti; hlt; cli" ::: "memory");
+        net_wait_for_io();
         virtio_net_rx_poll();
 
         uint32_t src_ip = 0; uint16_t src_port = 0;

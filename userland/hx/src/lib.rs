@@ -18,6 +18,7 @@ static mut EDITOR: Editor = Editor::new();
 #[no_mangle]
 pub extern "C" fn main(argc: i32, argv: *const *const u8, _envp: *const *const u8) -> i32 {
     let ed = unsafe { &mut EDITOR };
+    ed.boot_init();
 
     if argc >= 2 {
         unsafe {

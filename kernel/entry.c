@@ -153,7 +153,7 @@ static void seed_asdsh_into_vfs(void) {
         "asdsh", "hx", "ls", "cat", "mkdir", "rm", "touch",
         "echo", "pwd", "sysinfo", "uname", "uptime", "id", "whoami",
         "kill", "hexdump", "wc", "ping", "filetest", "nettest", "hxtest",
-        "grep", "find", "sort", "head", "tail", "do", "apm", NULL
+        "grep", "find", "sort", "head", "tail", "do", "apm", "ws", "dock", "term", NULL
     };
 
     vfs_mkdir("/bin");
@@ -670,9 +670,6 @@ void kernel_main_body(asd_bib_t *bib, uint64_t magic) {
 
     serial_puts("  launching asdinit (PID 1)\n");
     serial_puts("  entering asdinit main loop\n");
-
-    pic_unmask(0);    /* PIT / sched_tick */
-    __asm__ volatile("sti");
 
     /* These are defined in sched.c but may be static or named differently in this build */
     extern void sched_bootstrap_init_thread(void);

@@ -17,7 +17,9 @@ pub struct Screen {
 
 impl Screen {
     pub const fn new() -> Self {
-        Screen { rows: 25, cols: 80 }
+        // Zero so the enclosing static Editor stays in __bss (see buf.rs);
+        // real dimensions are set in Editor::boot_init().
+        Screen { rows: 0, cols: 0 }
     }
 }
 

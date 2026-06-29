@@ -189,6 +189,8 @@ static int virtio_blk_submit(virtio_blk_ctx_t *ctx, uint64_t lba, void *buf, uin
         uint16_t used_idx = *(volatile uint16_t *)&ctx->used->idx;
         if (used_idx != ctx->last_used_idx) {
             ctx->last_used_idx = used_idx;
+            /* Acknowledge/clear the interrupt on the VirtIO device */
+            (void)io_in8((uint16_t)(ctx->io_base + 0x13));
             if (*status != 0) return -1;
             if (!is_write) memcpy(buf, data, data_len);
             return 0;

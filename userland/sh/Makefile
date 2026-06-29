@@ -21,7 +21,7 @@ CFLAGS  = --target=x86_64-apple-macosx13.0 \
 LD      = ld64.lld
 LDFLAGS = -arch x86_64 \
           -platform_version macos 13.0 13.0 \
-          -e _start
+          -e _start -no_fixup_chains
 
 LIBASD  = ../libasd/build/libasd.a
 START_OBJ = ../libasd/build/start.o

@@ -8,7 +8,7 @@ START_OBJ   = ../libasd/build/start.o
 LD          = ld64.lld
 LDFLAGS     = -arch x86_64 \
               -platform_version macos 13.0 13.0 \
-              -e _start
+              -e _start -no_fixup_chains
 
 # Locate cargo/rustup: try known Windows path first, fall back to $HOME (Linux/Mac)
 _CARGO_SEARCH := /c/Users/Администратор/.cargo/bin/cargo \

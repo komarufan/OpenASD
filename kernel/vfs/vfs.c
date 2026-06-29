@@ -334,7 +334,9 @@ void vfs_close_all(struct pcb *pcb) {
 }
 
 int vfs_read(fd_t fd, void *buf, size_t n, size_t *got) {
-    if (fd <= 2 || !buf) return VFS_EINVAL;
+    /* See vfs_write: honor a redirected fd 0/1/2 (pipe in fd_table) rather than
+     * rejecting — the fd_table lookup below decides validity. */
+    if (!buf) return VFS_EINVAL;
 
     spin_lock(&g_vfs_lock);
 
@@ -386,7 +388,11 @@ int vfs_read(fd_t fd, void *buf, size_t n, size_t *got) {
 }
 
 int vfs_write(fd_t fd, const void *buf, size_t n) {
-    if (fd <= 2 || !buf || n == 0) return VFS_EINVAL;
+    /* fd 0/1/2 are normally console (handled in the syscall layer), but when a
+     * process has redirected them (pipe in fd_table[fd], e.g. a shell under the
+     * terminal), the syscall layer routes here — so honor the fd_table entry
+     * instead of rejecting.  Only the lookup below decides validity. */
+    if (!buf || n == 0) return VFS_EINVAL;
 
     spin_lock(&g_vfs_lock);
 
@@ -659,7 +665,7 @@ int vfs_pipe(int *rfd_out, int *wfd_out) {
     size_t rb_sz = ringbuf_required_size(1, 4096);
     ringbuf_t *rb = (ringbuf_t *)kmalloc(rb_sz);
     if (!rb) return VFS_ENOSPC;
-    ringbuf_init(rb, 1, 4096);
+    if (ringbuf_init(rb, 1, 4096) != 0) { kfree(rb); return VFS_ERR; }
 
     spin_lock(&g_vfs_lock);
 

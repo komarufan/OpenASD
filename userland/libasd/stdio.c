@@ -133,7 +133,14 @@ int readline(char *buf, int cap) {
     for (;;) {
         char c;
         long r = asd_read(STDIN_FD, &c, 1);
-        if (r <= 0) break;
+        if (r <= 0) {
+            /* No input available yet.  STDIN may be a pipe (terminal) or the
+             * keyboard, both of which read non-blocking and return 0 when
+             * empty.  Yield and retry so the shell blocks on a full line
+             * instead of busy-spinning and reprinting its prompt forever. */
+            asd_yield();
+            continue;
+        }
         if (c == '\n' || c == '\r') { asd_write(STDOUT_FD, "\n", 1); break; }
         if ((c == '\b' || c == 127) && i > 0) {
             i--;

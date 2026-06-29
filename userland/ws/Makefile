@@ -15,7 +15,7 @@ CFLAGS  = --target=x86_64-apple-macosx13.0 \
 LD      = ld64.lld
 LDFLAGS = -arch x86_64 \
           -platform_version macos 13.0 13.0 \
-          -e _start
+          -e _start -no_fixup_chains
 
 LIBASD  = ../libasd/build/libasd.a
 LIBGUI  = ../libgui/build/libgui.a
@@ -40,8 +40,11 @@ $(BUILD):
 $(BUILD)/main.o: main.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(TARGET): $(BUILD)/main.o $(LIBASD) $(LIBGUI) $(START_OBJ) | $(BUILD)
-	$(LD) $(LDFLAGS) $(START_OBJ) $(BUILD)/main.o $(LIBGUI) $(LIBASD) -o $@
+$(BUILD)/wallpaper.o: wallpaper.S wallpaper.bin | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ wallpaper.S
+
+$(TARGET): $(BUILD)/main.o $(BUILD)/wallpaper.o $(LIBASD) $(LIBGUI) $(START_OBJ) | $(BUILD)
+	$(LD) $(LDFLAGS) $(START_OBJ) $(BUILD)/main.o $(BUILD)/wallpaper.o $(LIBGUI) $(LIBASD) -o $@
 
 clean:
 	rm -rf $(BUILD)

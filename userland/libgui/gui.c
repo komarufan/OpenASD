@@ -22,7 +22,7 @@ int gui_init(void) {
     return 0;
 }
 
-int gui_create_window(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t bg_color) {
+int gui_create_window_ex(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t bg_color, uint32_t flags) {
     ws_msg_t msg;
     memset(&msg, 0, sizeof(msg));
     msg.type = WS_MSG_CREATE_WINDOW;
@@ -31,19 +31,35 @@ int gui_create_window(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t bg_co
     msg.create.w = w;
     msg.create.h = h;
     msg.create.bg_color = bg_color;
-    
-    /* Send my port name so WS can reply */
-    strncpy(msg.text.text, g_my_port_name, sizeof(msg.text.text));
-    
+    msg.create.flags = flags;
+
+    /* Send my port name so WS can reply (dedicated field — must NOT alias the
+     * create geometry via the union, or it corrupts h/bg_color). */
+    strncpy(msg.create.port_name, g_my_port_name, sizeof(msg.create.port_name));
+
     asd_port_send(g_ws_port, &msg, sizeof(msg));
-    
+
     /* Wait for WS to reply with win_id */
     ws_msg_t reply;
     while (asd_port_recv(g_my_port, &reply, sizeof(reply)) < 0) {
         asd_yield();
     }
-    
+
     return reply.win_id;
+}
+
+int gui_create_window(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t bg_color) {
+    return gui_create_window_ex(x, y, w, h, bg_color, 0);
+}
+
+int gui_set_title(int32_t win_id, const char *title) {
+    ws_msg_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = WS_MSG_SET_TITLE;
+    msg.win_id = win_id;
+    strncpy(msg.title.title, title, sizeof(msg.title.title) - 1);
+    msg.title.title[sizeof(msg.title.title) - 1] = '\0';
+    return asd_port_send(g_ws_port, &msg, sizeof(msg));
 }
 
 int gui_draw_rect(int32_t win_id, int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
@@ -78,7 +94,11 @@ int gui_flush(int32_t win_id) {
 }
 
 int gui_poll_event(ws_msg_t *evt) {
-    if (asd_port_recv(g_my_port, evt, sizeof(ws_msg_t)) == sizeof(ws_msg_t)) {
+    /* Non-blocking: callers (term, dock) multiplex this with other work
+     * (reading a shell pipe, redrawing) in a cooperative yield loop, so it must
+     * NOT block — a blocking recv would stop the terminal from ever displaying
+     * shell output until the next keypress. */
+    if (asd_port_recv_nonblock(g_my_port, evt, sizeof(ws_msg_t)) == (int)sizeof(ws_msg_t)) {
         return 1;
     }
     return 0;
