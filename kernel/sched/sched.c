@@ -797,6 +797,14 @@ int sched_reap(pid_t pid, exit_info_t *info) {
     runq_t  *rq  = &g_runq[cpu];
     pcb_t   *waiter = sched_current();
 
+    /* Save the outer reap context so foreground reaps can NEST: the shell reaps
+     * `do`, then `do` itself reaps `apm`.  With single globals the inner reap
+     * would clobber the outer's longjmp target and the shell would never
+     * resume — i.e. `do <anything>` hangs the machine. */
+    pcb_t          *prev_reap_waiter = g_reap_waiter;
+    sched_jmpbuf_t  prev_reap_jmp    = g_reap_jmp;
+    int             prev_reap_active = g_reap_jmp_active;
+
     g_reap_waiter      = waiter;
     g_reap_jmp_active  = 1;
 
@@ -834,14 +842,16 @@ int sched_reap(pid_t pid, exit_info_t *info) {
 
     pcb->sched_class  = saved_class;
     pcb->priority     = saved_pri;
-    g_reap_jmp_active = 0;
 
     if (pcb->state != PROC_DEAD) {
         pcb->state     = PROC_DEAD;
         pcb->exit_code = -1;
     }
 
-    g_reap_waiter = NULL;
+    /* Restore the outer reap context (re-entrancy — supports nested reaps). */
+    g_reap_waiter     = prev_reap_waiter;
+    g_reap_jmp        = prev_reap_jmp;
+    g_reap_jmp_active = prev_reap_active;
 
     if (info) {
         info->exit_code = pcb->exit_code;

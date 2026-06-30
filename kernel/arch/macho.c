@@ -328,14 +328,27 @@ uint32_t macho_spawn(const char *vfs_path, const char **argv, const char **envp)
 
     extern uid_t g_shell_uid;
     extern gid_t g_shell_gid;
+    extern pcb_t *sched_current(void);
     pcb->regs.rip    = entry;
     pcb->regs.rsp    = initial_rsp;
     pcb->regs.rflags = 0x202;
     pcb->regs.cr3    = vm->cr3;
     pcb->regs.cs     = 0x2B;
     pcb->regs.ss     = 0x23;
-    pcb->uid         = g_shell_uid;
-    pcb->gid         = g_shell_gid;
+    /* Inherit uid/gid from the spawning process so privilege changes propagate
+     * — e.g. `do` setuid(0)'s itself, then its child must run as root.  Only
+     * processes spawned directly by init (PID 1) — the GUI session and services
+     * — take g_shell_uid/gid (the logged-in user, or root before login). */
+    {
+        pcb_t *parent = sched_current();
+        if (parent && parent->pid != 1) {
+            pcb->uid = parent->uid;
+            pcb->gid = parent->gid;
+        } else {
+            pcb->uid = g_shell_uid;
+            pcb->gid = g_shell_gid;
+        }
+    }
     pcb->deadline_ns = UINT64_MAX;
     pcb->state       = PROC_READY;
     sched_enqueue(pcb);
