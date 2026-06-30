@@ -655,6 +655,28 @@ static void copy_file_to_ffs(const char *src_path, const char *dst_path) {
     serial_puts("\n");
 }
 
+/* Copy every regular file from src_dir (e.g. /boot/bin) into dst_dir (/bin) on
+ * the FFS root.  Enumerates the directory instead of using a hardcoded list, so
+ * newly added binaries (hx, files, do, apm, ...) are always installed and the
+ * list never goes stale. */
+static void copy_dir_to_ffs(const char *src_dir, const char *dst_dir) {
+    static vfs_dirent_t ents[128];
+    uint32_t n = 0;
+    if (vfs_readdir(src_dir, ents, 128, &n) != 0) return;
+    for (uint32_t i = 0; i < n; i++) {
+        if (ents[i].kind != VFS_NODE_FILE) continue;
+        if (ents[i].name[0] == '.') continue;          /* skip "." / ".." */
+        static char src[128], dst[128];
+        strncpy(src, src_dir, sizeof(src) - 1); src[sizeof(src) - 1] = 0;
+        if (src[strlen(src) - 1] != '/') strncat(src, "/", sizeof(src) - strlen(src) - 1);
+        strncat(src, ents[i].name, sizeof(src) - strlen(src) - 1);
+        strncpy(dst, dst_dir, sizeof(dst) - 1); dst[sizeof(dst) - 1] = 0;
+        if (dst[strlen(dst) - 1] != '/') strncat(dst, "/", sizeof(dst) - strlen(dst) - 1);
+        strncat(dst, ents[i].name, sizeof(dst) - strlen(dst) - 1);
+        copy_file_to_ffs(src, dst);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Deploy base directory structure + binaries to FFS root              */
 /* ------------------------------------------------------------------ */
@@ -809,32 +831,12 @@ static void deploy_directory_structure(const char *user_name) {
         }
     }
 
-    /* Copy user binaries from live ESP /bin → FFS /bin */
+    /* Copy ALL user binaries from live /boot/bin → FFS /bin (and sbin).
+     * Enumerated, not a hardcoded list, so hx/files/do/apm/grep/... are never
+     * left out. */
     serial_puts("  [deploy] Copying binaries to FFS\n");
-    static const char *bins[] = {
-        "asdsh", "ls", "cat", "mkdir", "rm", "touch", "echo", "pwd",
-        "sysinfo", "uname", "uptime", "id", "whoami", "kill",
-        "hexdump", "wc", "hx", "mifetch", "ping", "ws", "dock", "term", NULL
-    };
-    for (int i = 0; bins[i]; i++) {
-        static char src[64], dst[64];
-        strncpy(src, "/boot/bin/", sizeof(src) - 1);
-        strncat(src, bins[i], sizeof(src) - strlen(src) - 1);
-        strncpy(dst, "/bin/", sizeof(dst) - 1);
-        strncat(dst, bins[i], sizeof(dst) - strlen(dst) - 1);
-        copy_file_to_ffs(src, dst);
-    }
-
-    /* sbin */
-    static const char *sbins[] = { "asdlog", "netd", NULL };
-    for (int i = 0; sbins[i]; i++) {
-        static char src[64], dst[64];
-        strncpy(src, "/boot/sbin/", sizeof(src) - 1);
-        strncat(src, sbins[i], sizeof(src) - strlen(src) - 1);
-        strncpy(dst, "/sbin/", sizeof(dst) - 1);
-        strncat(dst, sbins[i], sizeof(dst) - strlen(dst) - 1);
-        copy_file_to_ffs(src, dst);
-    }
+    copy_dir_to_ffs("/boot/bin", "/bin");
+    copy_dir_to_ffs("/boot/sbin", "/sbin");
 
     serial_puts("  [deploy] Directory structure ready\n");
 }
