@@ -10,6 +10,7 @@ all:
 	$(MAKE) -C ws
 	$(MAKE) -C dock
 	$(MAKE) -C term
+	$(MAKE) -C files
 	$(MAKE) -C hx
 
 clean:

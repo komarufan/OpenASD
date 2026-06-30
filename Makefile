@@ -124,6 +124,8 @@ live-image: all
 	@mcopy -i "$(LIVE_IMG)" userland/ws/build/ws ::/bin/ws
 	@mcopy -i "$(LIVE_IMG)" userland/dock/build/dock ::/bin/dock
 	@mcopy -i "$(LIVE_IMG)" userland/term/build/term ::/bin/term
+	@mcopy -i "$(LIVE_IMG)" userland/files/build/files ::/bin/files
+	@[ -f userland/ws/wallpaper.bin ] && mcopy -i "$(LIVE_IMG)" userland/ws/wallpaper.bin ::/wallpaper.bin || true
 	@for b in $(LIVE_BINS); do \
 		mcopy -i "$(LIVE_IMG)" userland/bin/build/$$b ::/bin/$$b; \
 	done
@@ -153,6 +155,8 @@ prepare-run: all
 	@mcopy -i "$(LIVE_IMG)" userland/ws/build/ws ::/bin/ws
 	@mcopy -i "$(LIVE_IMG)" userland/dock/build/dock ::/bin/dock
 	@mcopy -i "$(LIVE_IMG)" userland/term/build/term ::/bin/term
+	@mcopy -i "$(LIVE_IMG)" userland/files/build/files ::/bin/files
+	@[ -f userland/ws/wallpaper.bin ] && mcopy -i "$(LIVE_IMG)" userland/ws/wallpaper.bin ::/wallpaper.bin || true
 	@for b in $(LIVE_BINS); do \
 		mcopy -i "$(LIVE_IMG)" userland/bin/build/$$b ::/bin/$$b; \
 	done
@@ -270,6 +274,7 @@ install: all
 	@mcopy -o -i "$(DISK_IMG)" userland/ws/build/ws ::/bin/ws
 	@mcopy -o -i "$(DISK_IMG)" userland/dock/build/dock ::/bin/dock
 	@mcopy -o -i "$(DISK_IMG)" userland/term/build/term ::/bin/term
+	@mcopy -o -i "$(DISK_IMG)" userland/files/build/files ::/bin/files
 	@for b in $(LIVE_BINS); do \
 		mcopy -o -i "$(DISK_IMG)" userland/bin/build/$$b ::/bin/$$b; \
 	done

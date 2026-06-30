@@ -37,11 +37,28 @@ uint32_t g_screen_h = 0;
 uint32_t g_stride = 0;
 uint32_t g_format = 0;
 
-/* Desktop wallpaper: raw 1280x800 XRGB8888 pixels embedded via wallpaper.S
- * (.incbin wallpaper.bin).  Scaled to the actual screen at compose time. */
+/* Desktop wallpaper: raw 1280x800 XRGB8888 pixels loaded at startup from
+ * /boot/wallpaper.bin into a BSS buffer (NOT embedded in the binary — that
+ * bloated ws to 4 MB, which choked the installer's FFS copy and the Mach-O
+ * loader).  Falls back to a solid colour if the file is missing/short. */
 #define WP_W 1280u
 #define WP_H 800u
-extern const uint32_t wallpaper_data[];
+static uint32_t g_wallpaper[WP_W * WP_H];   /* 4 MB, zero-fill BSS (demand-paged) */
+static int      g_have_wallpaper = 0;
+
+static void load_wallpaper(void) {
+    int fd = asd_open("/boot/wallpaper.bin", O_RDONLY);
+    if (fd < 0) return;
+    uint8_t *p = (uint8_t *)g_wallpaper;
+    size_t want = sizeof(g_wallpaper), total = 0;
+    while (total < want) {
+        long r = asd_read(fd, p + total, want - total);
+        if (r <= 0) break;
+        total += (size_t)r;
+    }
+    asd_close(fd);
+    if (total == want) g_have_wallpaper = 1;
+}
 
 /* Simple White/Black arrow cursor */
 const char g_cursor_map[12][13] = {
@@ -180,6 +197,8 @@ int main(void) {
     }
 
     memset(g_windows, 0, sizeof(g_windows));
+
+    load_wallpaper();   /* /boot/wallpaper.bin -> g_wallpaper (solid fallback) */
 
     int32_t cursor_x = g_screen_w / 2;
     int32_t cursor_y = g_screen_h / 2;
@@ -446,15 +465,18 @@ int main(void) {
         prev_btn = mbtn;
 
         /* 4. Render & Compose Desktop */
-        /* Background: embedded wallpaper (1:1 copy when the screen matches the
-         * wallpaper resolution, nearest-neighbour scale otherwise). */
-        if (g_screen_w == WP_W && g_screen_h == WP_H) {
+        /* Background: wallpaper (1:1 when the screen matches, nearest-neighbour
+         * scale otherwise) or a solid colour if no wallpaper was loaded. */
+        if (!g_have_wallpaper) {
+            draw_rect(g_backbuffer, g_screen_w, g_screen_h, 0, 0,
+                      g_screen_w, g_screen_h, 0x000F172A);
+        } else if (g_screen_w == WP_W && g_screen_h == WP_H) {
             uint32_t n = WP_W * WP_H;
-            for (uint32_t i = 0; i < n; i++) g_backbuffer[i] = wallpaper_data[i];
+            for (uint32_t i = 0; i < n; i++) g_backbuffer[i] = g_wallpaper[i];
         } else {
             for (uint32_t sy = 0; sy < g_screen_h; sy++) {
                 uint32_t wy = sy * WP_H / g_screen_h;
-                const uint32_t *wrow = &wallpaper_data[wy * WP_W];
+                const uint32_t *wrow = &g_wallpaper[wy * WP_W];
                 uint32_t *brow = &g_backbuffer[sy * g_screen_w];
                 for (uint32_t sx = 0; sx < g_screen_w; sx++)
                     brow[sx] = wrow[sx * WP_W / g_screen_w];

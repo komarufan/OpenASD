@@ -22,7 +22,7 @@ LIBGUI  = ../libgui/build/libgui.a
 START_OBJ = ../libasd/build/start.o
 
 BUILD   = build
-TARGET  = $(BUILD)/ws
+TARGET  = $(BUILD)/files
 
 .PHONY: all clean libasd libgui
 

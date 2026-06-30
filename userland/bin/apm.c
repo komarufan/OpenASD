@@ -1428,6 +1428,22 @@ int main(int argc, const char **argv) {
     const char *cmd = argv[1];
     int rc = 0;
 
+    /* Package operations that modify the system require root.  User permission
+     * separation is otherwise wide open, so apm is locked behind `do`: e.g.
+     * `do apm install <pkg>`.  Read-only commands (search/list/info/check)
+     * stay available to everyone. */
+    static const char *priv_cmds[] = {
+        "update", "install", "add", "del", "remove", "rm", "upgrade", "clean", 0
+    };
+    int needs_root = 0;
+    for (int i = 0; priv_cmds[i]; i++)
+        if (seq(cmd, priv_cmds[i])) { needs_root = 1; break; }
+    if (needs_root && asd_getuid() != 0) {
+        err("apm: '"); err(cmd); errn("' requires root privileges.");
+        err("       run it through 'do', e.g.:  do apm "); errn(cmd);
+        asd_exit(1);
+    }
+
     if (seq(cmd, "update")) {
         rc = cmd_update();
     } else if (seq(cmd, "install") || seq(cmd, "add")) {
